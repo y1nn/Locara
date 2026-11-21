@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.15" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+    <PackageReference Include="SharpZipLib" Version="1.4.2" />
+    <PackageReference Include="YamlDotNet" Version="16.3.0" />
+    <PackageReference Include="ClosedXML" Version="0.105.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Locara.Checks" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Fonts/NotoSansArabic-Regular.ttf" LogicalName="Locara.NotoSansArabic" />
+    <EmbeddedResource Include="Fonts/NotoSansArabic-Bold.ttf" LogicalName="Locara.NotoSansArabicBold" />
+    <EmbeddedResource Include="Fonts/IBMPlexSansArabic-Medium.ttf" LogicalName="Locara.IBMPlexSansArabicMedium" />
+    <EmbeddedResource Include="Fonts/IBMPlexSansArabic-Bold.ttf" LogicalName="Locara.IBMPlexSansArabicBold" />
+    <EmbeddedResource Include="Fonts/NotoNaskhArabic-Bold.ttf" LogicalName="Locara.NotoNaskhArabicBold" />
+    <EmbeddedResource Include="Fonts/Amiri-Regular.ttf" LogicalName="Locara.AmiriRegular" />
+    <EmbeddedResource Include="Fonts/Amiri-Bold.ttf" LogicalName="Locara.AmiriBold" />
+    <EmbeddedResource Include="Fonts/Noto-Arabic-OFL.txt" LogicalName="Locara.NotoArabicLicense" />
+    <EmbeddedResource Include="Fonts/IBM-Plex-OFL.txt" LogicalName="Locara.IBMPlexLicense" />
+    <EmbeddedResource Include="Fonts/Amiri-OFL.txt" LogicalName="Locara.AmiriLicense" />
+  </ItemGroup>
+</Project>

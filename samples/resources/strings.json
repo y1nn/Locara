@@ -1,0 +1,6 @@
+{
+  "menu": {"return": "Back", "ready": "OK"},
+  "dialogue": {"return": "Back", "greeting": "Welcome, [player_name]!"},
+  "count": 3,
+  "enabled": true
+}

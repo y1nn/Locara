@@ -1,0 +1,78 @@
+THIRD-PARTY SOFTWARE NOTICES AND LICENSES
+=========================================
+
+Locara incorporates and redistributes the following open-source libraries,
+fonts, and components. Each component remains subject to its respective license.
+
+-------------------------------------------------------------------------------
+1. RUNTIME LIBRARIES (NuGet)
+-------------------------------------------------------------------------------
+
+* Microsoft.Data.Sqlite (10.0.15)
+  Copyright (c) .NET Foundation and Contributors
+  License: MIT License
+  https://github.com/dotnet/efcore
+
+* SQLitePCLRaw.bundle_e_sqlite3 (3.0.5)
+  Copyright (c) Eric Sink and Contributors
+  License: Apache License 2.0
+  https://github.com/ericsink/SQLitePCL.raw
+  Includes SQLite (Public Domain — https://www.sqlite.org/copyright.html)
+
+* SharpZipLib (1.4.2)
+  Copyright (c) ICSharpCode / SharpZipLib Contributors
+  License: MIT License
+  https://github.com/icsharpcode/SharpZipLib
+
+* YamlDotNet (16.3.0)
+  Copyright (c) Antoine Aubry and Contributors
+  License: MIT License
+  https://github.com/aaubry/YamlDotNet
+
+* ClosedXML (0.105.0)
+  Copyright (c) ClosedXML Contributors
+  License: MIT License
+  https://github.com/ClosedXML/ClosedXML
+
+-------------------------------------------------------------------------------
+2. TEST LIBRARIES (Development / Locara.Checks only, not shipped in releases)
+-------------------------------------------------------------------------------
+
+* xUnit.net (2.9.3) & xunit.runner.visualstudio (3.0.2)
+  Copyright (c) .NET Foundation and Contributors
+  License: Apache License 2.0
+  https://github.com/xunit/xunit
+
+* Microsoft.NET.Test.Sdk (17.13.0)
+  Copyright (c) Microsoft Corporation
+  License: MIT License
+  https://github.com/microsoft/vstest
+
+-------------------------------------------------------------------------------
+3. BUNDLED ARABIC FONTS (SIL Open Font License 1.1)
+-------------------------------------------------------------------------------
+
+* Noto Sans Arabic (Regular, Bold) & Noto Naskh Arabic (Bold)
+  Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic)
+  License: SIL Open Font License 1.1
+  Full license text: src/Locara.Core/Fonts/Noto-Arabic-OFL.txt
+
+* IBM Plex Sans Arabic (Medium, Bold)
+  Copyright (c) 2017 IBM Corp. with Reserved Font Name "Plex"
+  License: SIL Open Font License 1.1
+  Full license text: src/Locara.Core/Fonts/IBM-Plex-OFL.txt
+
+* Amiri (Regular, Bold)
+  Copyright (c) 2010-2022 Khaled Hosny (khaled@aliftype.com),
+  with Reserved Font Name "Amiri"
+  License: SIL Open Font License 1.1
+  Full license text: src/Locara.Core/Fonts/Amiri-OFL.txt
+
+-------------------------------------------------------------------------------
+4. ALGORITHMS & CODEBOOKS
+-------------------------------------------------------------------------------
+
+* SMAZ Reverse Codebook (used in Godot OptimizedTranslation .translation reader)
+  Original SMAZ algorithm Copyright (c) 2006-2009 Salvatore Sanfilippo (antirez)
+  License: BSD 3-Clause License
+  https://github.com/antirez/smaz

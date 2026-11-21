@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+.vs/
+artifacts/
+*.db
+*.db-*
+*.locara/
+*.pck
+*.pak
+*.locres
+*.bundle
+*.assets
+*.zip
+**/.godot/
+*.user

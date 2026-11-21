@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/checks/">
+    <Project Path="checks/Locara.Checks/Locara.Checks.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Locara.Cli/Locara.Cli.csproj" />
+    <Project Path="src/Locara.Core/Locara.Core.csproj" />
+    <Project Path="src/Locara.Desktop/Locara.Desktop.csproj" />
+  </Folder>
+</Solution>

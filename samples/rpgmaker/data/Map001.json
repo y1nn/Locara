@@ -1,0 +1,30 @@
+{
+  "displayName": "Observatory",
+  "events": [
+    null,
+    {
+      "id": 1,
+      "name": "internal event",
+      "pages": [
+        {
+          "list": [
+            {"code": 101, "indent": 0, "parameters": ["GuideFace", 0, 0, 2]},
+            {"code": 401, "indent": 0, "parameters": ["Welcome, \\N[1]!"]},
+            {"code": 102, "indent": 0, "parameters": [["Watch stars", "Leave"], -2, 0, 2, 0]},
+            {"code": 402, "indent": 0, "parameters": [0, "Watch stars"]},
+            {"code": 101, "indent": 1, "parameters": ["GuideFace", 0, 0, 2]},
+            {"code": 401, "indent": 1, "parameters": ["The sky is clear."]},
+            {"code": 0, "indent": 1, "parameters": []},
+            {"code": 402, "indent": 0, "parameters": [1, "Leave"]},
+            {"code": 101, "indent": 1, "parameters": ["GuideFace", 0, 0, 2]},
+            {"code": 401, "indent": 1, "parameters": ["See you tomorrow."]},
+            {"code": 0, "indent": 1, "parameters": []},
+            {"code": 404, "indent": 0, "parameters": []},
+            {"code": 355, "indent": 0, "parameters": ["console.log('internal script');"]},
+            {"code": 0, "indent": 0, "parameters": []}
+          ]
+        }
+      ]
+    }
+  ]
+}

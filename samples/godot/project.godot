@@ -1,0 +1,13 @@
+config_version=5
+
+[application]
+config/name="Locara Observatory"
+run/main_scene="res://main.tscn"
+
+[display]
+window/size/viewport_width=960
+window/size/viewport_height=600
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+environment/defaults/default_clear_color=Color(0.055, 0.086, 0.12, 1)
