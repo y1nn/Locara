@@ -24,7 +24,7 @@ public record PackagePreview(string Package, bool Final, IReadOnlyList<PlannedRe
     public string Notice { get; init; } = "";
     internal string Fingerprint { get; init; } = "";
 }
-public record ExtractionRule(string? Key = null, string? Source = null, string? Target = null, string? Sheet = null, string[]? Fields = null);
+public record ExtractionRule(string? Key = null, string? Source = null, string? Target = null, string? Sheet = null, string[]? Fields = null, string[]? FieldPatterns = null);
 public record TablePreview(string Sheet, IReadOnlyList<string> Headers, IReadOnlyList<string[]> Rows,
     IReadOnlyList<int>? RowsWiderThanHeader = null);
 public record ExtractionPreview(IReadOnlyList<TablePreview> Tables, IReadOnlyList<TextSlot> Fields, ExtractionRule? Rule);

@@ -81,7 +81,7 @@ public sealed class ProjectService(ProjectStore store)
     }
 
     private const string LooseFiles = "loose";
-    private const string ExtractionRevision = "4";
+    private const string ExtractionRevision = "6";
 
     public static string InitialSearch(string source) => "";
     private string PackageSetting => "package:" + store.Get("source_scope");
@@ -90,6 +90,8 @@ public sealed class ProjectService(ProjectStore store)
     private string RulesSetting(string resource) => "extraction:" + store.Get("source_scope") + ":" + resource;
     private string FileSelectionSetting(string package) =>
         "file-selection:" + store.Get("source_scope") + ":" + package;
+    private string FileSelectionModeSetting(string package) =>
+        "file-selection-mode:" + store.Get("source_scope") + ":" + package;
 
     private Dictionary<string, bool> LoadFileSelection(string package)
     {
@@ -106,6 +108,22 @@ public sealed class ProjectService(ProjectStore store)
 
     private void SaveFileSelection(string package, Dictionary<string, bool> selection) =>
         store.Set(FileSelectionSetting(package), JsonSerializer.Serialize(selection));
+
+    private Dictionary<string, string> LoadFileSelectionModes(string package)
+    {
+        string raw = store.Get(FileSelectionModeSetting(package));
+        if (raw.Length == 0) return new(StringComparer.Ordinal);
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(raw) is { } parsed
+                ? new(parsed, StringComparer.Ordinal)
+                : new(StringComparer.Ordinal);
+        }
+        catch (JsonException) { return new(StringComparer.Ordinal); }
+    }
+
+    private void SaveFileSelectionModes(string package, Dictionary<string, string> modes) =>
+        store.Set(FileSelectionModeSetting(package), JsonSerializer.Serialize(modes));
 
     public void EnsureCatalogSelected()
     {
@@ -233,6 +251,36 @@ public sealed class ProjectService(ProjectStore store)
         return result;
     }
 
+    private List<Diagnostic> ReadScanErrors()
+    {
+        string raw = store.Get("scan_errors");
+        if (string.IsNullOrWhiteSpace(raw) || raw == "[]") return [];
+        try { return JsonSerializer.Deserialize<List<Diagnostic>>(raw) ?? []; }
+        catch (JsonException) { return [new Diagnostic("", raw)]; }
+    }
+
+    public bool HasBlockingScanErrors()
+    {
+        var errors = ReadScanErrors();
+        if (errors.Count == 0) return false;
+        string sourceRoot = store.Get("scanned_source");
+        string scannedPackage = store.Get("scanned_package");
+        if (scannedPackage.Length > 0 && scannedPackage != LooseFiles)
+            return true;
+        bool hasActiveUnits = store.Query("SELECT EXISTS(SELECT 1 FROM units WHERE active=1)", r => r.GetBoolean(0)).Single();
+        if (!hasActiveUnits) return true;
+        var activeFilePaths = store.Query("SELECT DISTINCT path FROM units WHERE active=1", r => r.GetString(0))
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var err in errors)
+        {
+            if (string.IsNullOrWhiteSpace(err.Path)
+                || string.Equals(err.Path, sourceRoot, StringComparison.OrdinalIgnoreCase)
+                || activeFilePaths.Contains(err.Path))
+                return true;
+        }
+        return false;
+    }
+
     public SourceCapability Capabilities(string? password = null, CancellationToken cancellation = default)
     {
         var source = CurrentSource(cancellation);
@@ -241,7 +289,7 @@ public sealed class ProjectService(ProjectStore store)
         var profile = Engines.Resolve(store.Info.Engine, paths, source.Path);
         bool hasText = paths.Any(path => source.FormatFor(path) != null);
         bool scanned = store.Get("scanned_source") == source.Root && store.Get("scanned_package") == source.Package
-            && store.Get("scan_errors") == "[]"
+            && !HasBlockingScanErrors()
             && store.Query("SELECT EXISTS(SELECT 1 FROM units WHERE active=1)", row => row.GetBoolean(0)).Single();
 
         if (StarTruckerCatalog.IsGameArchive(source.Path))
@@ -551,6 +599,7 @@ public sealed class ProjectService(ProjectStore store)
 
         cancellation.ThrowIfCancellationRequested();
         var fileSelection = LoadFileSelection(input.Package);
+        var fileSelectionModes = LoadFileSelectionModes(input.Package);
         store.Execute("BEGIN IMMEDIATE");
         try
         {
@@ -567,7 +616,45 @@ public sealed class ProjectService(ProjectStore store)
                 || seen.Any(p => p.EndsWith(".bundle", StringComparison.OrdinalIgnoreCase)
                     && (p.Contains("(en)", StringComparison.OrdinalIgnoreCase)
                         || p.Contains("english", StringComparison.OrdinalIgnoreCase)));
-            bool hasEnglishPathLocale = seen.Any(p => IsEnglishLocaleCode(ExtractPathLocale(p)));
+            bool hasPrimaryPathLocale = seen.Any(p => IsPrimaryLocaleSource(p));
+
+            var classifications = new Dictionary<string, FileClassification>(changes.Count, StringComparer.Ordinal);
+            foreach (var change in changes)
+                classifications[change.Path] = TextQualityClassifier.ClassifyFile(
+                    change.Path,
+                    change.Slots.Select(s => (s.Locator, s.Source)).ToArray(),
+                    change.Format.Name);
+
+            int primaryDedicatedHumanUnits = 0;
+            var changedPaths = new HashSet<string>(changes.Select(c => c.Path), StringComparer.Ordinal);
+            foreach (var change in changes)
+            {
+                if (!IsDedicatedLocalizationFormat(change.Path, change.Format.Name)) continue;
+                bool isSecondary = (change.Format is UnityBundleFormat && hasEnglishBundle && change.BundleLocale != null && !IsEnglishLocaleCode(change.BundleLocale))
+                    || (change.Format is not UnityBundleFormat && hasPrimaryPathLocale && ExtractPathLocale(change.Path) is { } loc && !IsEnglishLocaleCode(loc));
+                if (isSecondary) continue;
+                var q = classifications[change.Path];
+                if (q.Verdict == FileQualityVerdict.Translatable || change.Format is UnityI2Format or StarTruckerCatalog)
+                    primaryDedicatedHumanUnits += q.HumanCount;
+            }
+            if (primaryDedicatedHumanUnits < DedicatedLocalizationMinHumanUnits)
+            {
+                foreach (var (prevPath, prevInfo) in previous)
+                {
+                    if (!seen.Contains(prevPath) || changedPaths.Contains(prevPath)) continue;
+                    if (!IsDedicatedLocalizationFormat(prevPath, prevInfo.Format)) continue;
+                    bool isSecondary = prevInfo.Format != "unity-bundle"
+                        && hasPrimaryPathLocale
+                        && ExtractPathLocale(prevPath) is { } loc
+                        && !IsEnglishLocaleCode(loc);
+                    if (isSecondary) continue;
+                    primaryDedicatedHumanUnits += store.Query(
+                        "SELECT COUNT(*) FROM units WHERE path=$p AND active IN (1, 2)",
+                        r => r.GetInt32(0), ("$p", prevPath))[0];
+                    if (primaryDedicatedHumanUnits >= DedicatedLocalizationMinHumanUnits) break;
+                }
+            }
+            bool hasPrimaryDedicatedLoc = primaryDedicatedHumanUnits >= DedicatedLocalizationMinHumanUnits;
 
             foreach (var change in changes)
             {
@@ -582,6 +669,7 @@ public sealed class ProjectService(ProjectStore store)
                     FROM units WHERE path=$p
                     """, ProjectStore.ReadUnit, ("$p", change.Path)).ToDictionary(unit => unit.Id);
 
+                var quality = classifications[change.Path];
                 bool included;
                 string? pathLocale = ExtractPathLocale(change.Path);
                 if (fileSelection.TryGetValue(change.Path, out bool explicitIncluded))
@@ -603,25 +691,50 @@ public sealed class ProjectService(ProjectStore store)
                     advisories.Add(new(change.Path,
                         $"حزمة لغة أخرى ({change.BundleLocale}) — استُبعدت تلقائياً للاكتفاء باللغة الإنجليزية وتوفير رصيدك؛ يمكنك تفعيلها من تبويب «الملفات»."));
                 }
-                else if (change.Format is not UnityBundleFormat && hasEnglishPathLocale
+                else if (change.Format is not UnityBundleFormat && hasPrimaryPathLocale
                     && pathLocale != null && !IsEnglishLocaleCode(pathLocale))
                 {
                     included = false;
                     advisories.Add(new(change.Path,
                         $"ملف لغة أخرى ({pathLocale}) — استُبعد تلقائياً للاكتفاء باللغة الإنجليزية وتوفير رصيدك؛ يمكنك تفعيله من تبويب «الملفات»."));
                 }
-                else
+                else if (quality.Verdict == FileQualityVerdict.Technical)
                 {
-                    var quality = TextQualityClassifier.ClassifyFile(change.Path, change.Slots.Select(s => s.Source).ToArray());
-                    included = quality.Verdict != FileQualityVerdict.Technical;
-                    if (!included && change.Slots.Count > 0)
+                    included = false;
+                    if (change.Slots.Count > 0)
                     {
                         advisories.Add(new(change.Path,
                             $"استُبعد تلقائياً كملف تقني/برمجي ({quality.Reason}) — يمكنك تفعيله من تبويب «الملفات» إذا أردت ترجمته."));
                     }
                 }
+                else if (hasPrimaryDedicatedLoc
+                    && !IsDedicatedLocalizationFormat(change.Path, change.Format.Name)
+                    && !(IsExplicitLocalizationDirectory(change.Path) && quality.Verdict == FileQualityVerdict.Translatable))
+                {
+                    included = false;
+                    if (change.Slots.Count > 0)
+                    {
+                        advisories.Add(new(change.Path,
+                            "ملف بيانات/إعدادات جانبي — توجد ملفات ترجمة رسمية مخصّصة في المشروع، لذا استُبعد تلقائياً لحماية اللعبة وتوفير رصيدك؛ يمكنك تفعيله من تبويب «الملفات»."));
+                    }
+                }
+                else if (quality.Verdict == FileQualityVerdict.Mixed)
+                {
+                    included = false;
+                    if (change.Slots.Count > 0)
+                    {
+                        advisories.Add(new(change.Path,
+                            $"استُبعد تلقائياً كملف مختلط ({quality.Reason}) — يمكنك معاينته وتفعيل نصوصه البشرية فقط من تبويب «الملفات»."));
+                    }
+                }
+                else
+                {
+                    included = true;
+                }
 
-                int slotActive = included ? 1 : 2;
+                bool humanOnly = included
+                    && fileSelectionModes.TryGetValue(change.Path, out string? mode)
+                    && string.Equals(mode, "human", StringComparison.OrdinalIgnoreCase);
                 string unitScope = scope.Length == 0 ? change.Path : scope + "\n" + change.Path;
                 var matched = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var slot in change.Slots)
@@ -639,6 +752,13 @@ public sealed class ProjectService(ProjectStore store)
                     bool ambiguous = change.Format is StarTruckerCatalog
                         && slot.Locator.StartsWith("duplicate:", StringComparison.Ordinal)
                         && previous.GetValueOrDefault(change.Path).Hash != change.Hash;
+                    int slotActive = !included
+                        ? 2
+                        : (!humanOnly
+                            || (oldUnit != null && (oldUnit.Target.Length > 0 || oldUnit.Status != "pending"))
+                            || TextQualityClassifier.ClassifyEntry(slot.Locator, slot.Source, change.Format.Name) != StringQuality.Technical)
+                            ? 1
+                            : 2;
                     StoreSlot(id, change.Path, slot, oldUnit, profile.Name, ambiguous, slotActive);
                 }
                 if (change.Format is StarTruckerCatalog && previous.ContainsKey(change.Path))
@@ -694,23 +814,24 @@ public sealed class ProjectService(ProjectStore store)
 
         string package = store.Get("scanned_package");
         var explicitSelection = LoadFileSelection(package);
+        var selectionModes = LoadFileSelectionModes(package);
 
-        var unitsByFile = new Dictionary<string, List<(string Source, string Context, string Status, int Active)>>(StringComparer.Ordinal);
+        var unitsByFile = new Dictionary<string, List<(string Locator, string Source, string Context, string Status, int Active)>>(StringComparer.Ordinal);
         foreach (var row in store.Query("""
-            SELECT path, source, context, status, active FROM units
+            SELECT path, locator, source, context, status, active FROM units
             WHERE active IN (1, 2)
             ORDER BY path, locator
-            """, r => (Path: r.GetString(0), Source: r.GetString(1), Context: r.GetString(2), Status: r.GetString(3), Active: r.GetInt32(4))))
+            """, r => (Path: r.GetString(0), Locator: r.GetString(1), Source: r.GetString(2), Context: r.GetString(3), Status: r.GetString(4), Active: r.GetInt32(5))))
         {
             if (!unitsByFile.TryGetValue(row.Path, out var list))
             {
                 list = [];
                 unitsByFile[row.Path] = list;
             }
-            list.Add((row.Source, row.Context, row.Status, row.Active));
+            list.Add((row.Locator, row.Source, row.Context, row.Status, row.Active));
         }
 
-        static string? ExtractBundleLocale(string filePath, List<(string Source, string Context, string Status, int Active)> rows)
+        static string? ExtractBundleLocale(string filePath, List<(string Locator, string Source, string Context, string Status, int Active)> rows)
         {
             foreach (var r in rows)
             {
@@ -734,8 +855,27 @@ public sealed class ProjectService(ProjectStore store)
 
         bool hasEnglishBundle = files.Any(f => f.Format == "unity-bundle"
             && IsEnglishLocaleCode(ExtractBundleLocale(f.Path, unitsByFile.GetValueOrDefault(f.Path) ?? [])));
-        bool hasEnglishPathLocale = files.Any(f => f.Format != "unity-bundle"
-            && IsEnglishLocaleCode(ExtractPathLocale(f.Path)));
+        bool hasPrimaryPathLocale = files.Any(f => f.Format != "unity-bundle" && IsPrimaryLocaleSource(f.Path));
+
+        var classifications = new Dictionary<string, FileClassification>(files.Count, StringComparer.Ordinal);
+        int primaryDedicatedHumanUnits = 0;
+        foreach (var (filePath, format) in files)
+        {
+            var rows = unitsByFile.GetValueOrDefault(filePath) ?? [];
+            var entries = rows.Select(r => (r.Locator, r.Source)).ToArray();
+            var c = TextQualityClassifier.ClassifyFile(filePath, entries, format);
+            classifications[filePath] = c;
+
+            if (!IsDedicatedLocalizationFormat(filePath, format)) continue;
+            bool isSecondary = (format == "unity-bundle" && hasEnglishBundle
+                    && ExtractBundleLocale(filePath, rows) is { } bLoc && !IsEnglishLocaleCode(bLoc))
+                || (format != "unity-bundle" && hasPrimaryPathLocale
+                    && ExtractPathLocale(filePath) is { } pLoc && !IsEnglishLocaleCode(pLoc));
+            if (isSecondary) continue;
+            if (c.Verdict == FileQualityVerdict.Translatable || format is "unity-i2" or "star-trucker-catalog")
+                primaryDedicatedHumanUnits += c.HumanCount;
+        }
+        bool hasPrimaryDedicatedLoc = primaryDedicatedHumanUnits >= DedicatedLocalizationMinHumanUnits;
 
         var result = new List<FileQualitySummary>(files.Count);
         foreach (var (filePath, format) in files)
@@ -743,36 +883,36 @@ public sealed class ProjectService(ProjectStore store)
             var rows = unitsByFile.GetValueOrDefault(filePath) ?? [];
             int total = rows.Count;
             int pending = 0, translated = 0, approved = 0, activeOne = 0;
-            var sources = new List<string>(total);
-            foreach (var (src, _, status, active) in rows)
+            foreach (var (_, _, _, status, active) in rows)
             {
-                sources.Add(src);
                 if (active == 1) activeOne++;
                 if (status == "pending") pending++;
                 else if (status == "approved") approved++;
                 else if (status is "translated" or "imported") translated++;
             }
 
-            var classification = TextQualityClassifier.ClassifyFile(filePath, sources);
+            var classification = classifications[filePath];
             var verdict = classification.Verdict;
             string reason = classification.Reason;
-            if (format == "unity-bundle" && hasEnglishBundle)
+            if (format == "unity-bundle" && hasEnglishBundle
+                && ExtractBundleLocale(filePath, rows) is { } bundleLoc && !IsEnglishLocaleCode(bundleLoc))
             {
-                string? locale = ExtractBundleLocale(filePath, rows);
-                if (locale != null && !IsEnglishLocaleCode(locale))
-                {
-                    verdict = FileQualityVerdict.SecondaryLanguage;
-                    reason = $"حزمة لغة إضافية ({locale}) — مستبعدة افتراضياً للاكتفاء بالإنجليزية وتوفير رصيدك.";
-                }
+                verdict = FileQualityVerdict.SecondaryLanguage;
+                reason = $"حزمة لغة إضافية ({bundleLoc}) — مستبعدة افتراضياً للاكتفاء بالإنجليزية وتوفير رصيدك.";
             }
-            else if (format != "unity-bundle" && hasEnglishPathLocale)
+            else if (format != "unity-bundle" && hasPrimaryPathLocale
+                && ExtractPathLocale(filePath) is { } pathLocale && !IsEnglishLocaleCode(pathLocale))
             {
-                string? pathLocale = ExtractPathLocale(filePath);
-                if (pathLocale != null && !IsEnglishLocaleCode(pathLocale))
-                {
-                    verdict = FileQualityVerdict.SecondaryLanguage;
-                    reason = $"ملف لغة إضافية ({pathLocale}) — مستبعد افتراضياً للاكتفاء بالإنجليزية وتوفير رصيدك.";
-                }
+                verdict = FileQualityVerdict.SecondaryLanguage;
+                reason = $"ملف لغة إضافية ({pathLocale}) — مستبعد افتراضياً للاكتفاء بالإنجليزية وتوفير رصيدك.";
+            }
+            else if (verdict != FileQualityVerdict.Technical
+                && hasPrimaryDedicatedLoc
+                && !IsDedicatedLocalizationFormat(filePath, format)
+                && !(IsExplicitLocalizationDirectory(filePath) && verdict == FileQualityVerdict.Translatable))
+            {
+                verdict = FileQualityVerdict.AuxiliaryData;
+                reason = "ملف بيانات/إعدادات جانبي — توجد ملفات ترجمة رسمية مخصّصة في المشروع، لذا استُبعد افتراضياً لحماية اللعبة وتوفير رصيدك؛ يمكنك تفعيله عند الحاجة.";
             }
             else if (format == "unity-i2")
             {
@@ -798,32 +938,78 @@ public sealed class ProjectService(ProjectStore store)
             {
                 reason = "ملف ترجمة XUnity.AutoTranslator (BepInEx) — مخصّص لألعاب Unity ذات النصوص المدمجة في الكود البرمجي.";
             }
+            else if (format == "po" && IsGettextTemplate(filePath))
+            {
+                reason = "قالب الترجمة الرئيسي (Gettext POT) — نصوص اللعبة الرسمية جاهزة للترجمة.";
+            }
 
             bool included = total > 0
                 ? activeOne > 0
-                : (explicitSelection.TryGetValue(filePath, out bool saved) ? saved : verdict != FileQualityVerdict.Technical);
+                : (explicitSelection.TryGetValue(filePath, out bool saved) ? saved : verdict == FileQualityVerdict.Translatable);
+            bool humanOnly = included
+                && selectionModes.TryGetValue(filePath, out string? mode)
+                && string.Equals(mode, "human", StringComparison.OrdinalIgnoreCase);
 
             result.Add(new FileQualitySummary(
                 filePath, format, total, pending, translated, approved,
                 classification.HumanCount, classification.TechnicalCount, classification.TechnicalRatio,
-                verdict, reason, classification.Samples, included));
+                verdict, reason, classification.Samples, included, activeOne, humanOnly));
         }
 
         return result
-            .OrderBy(f => f.Verdict switch
+            .OrderByDescending(f => f.Included)
+            .ThenBy(f => f.Verdict switch
             {
                 FileQualityVerdict.Translatable => 0,
                 FileQualityVerdict.Mixed => 1,
-                FileQualityVerdict.SecondaryLanguage => 2,
-                _ => 3
+                FileQualityVerdict.AuxiliaryData => 2,
+                FileQualityVerdict.SecondaryLanguage => 3,
+                _ => 4
             })
-            .ThenByDescending(f => f.Format == "unity-i2")
+            .ThenByDescending(f => IsDedicatedLocalizationFormat(f.Path, f.Format))
             .ThenBy(f => f.Path, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
-    public void SetFileIncluded(string resourcePath, bool included) =>
-        SetFilesIncluded(new Dictionary<string, bool>(StringComparer.Ordinal) { [resourcePath] = included });
+    public void SetFileIncluded(string resourcePath, bool included, bool humanOnly = false)
+    {
+        if (!included || !humanOnly)
+        {
+            SetFilesIncluded(new Dictionary<string, bool>(StringComparer.Ordinal) { [resourcePath] = included });
+            return;
+        }
+        string package = store.Get("scanned_package");
+        store.Execute("BEGIN IMMEDIATE");
+        try
+        {
+            var saved = LoadFileSelection(package);
+            var modes = LoadFileSelectionModes(package);
+            saved[resourcePath] = true;
+            modes[resourcePath] = "human";
+
+            string format = store.Query("SELECT format FROM files WHERE path=$p AND active=1",
+                r => r.GetString(0), ("$p", resourcePath)).FirstOrDefault() ?? "";
+            var rows = store.Query(
+                "SELECT id, locator, source, target, status, active FROM units WHERE path=$p AND active IN (1, 2)",
+                r => (Id: r.GetString(0), Locator: r.GetString(1), Source: r.GetString(2), Target: r.GetString(3), Status: r.GetString(4), Active: r.GetInt32(5)),
+                ("$p", resourcePath));
+            foreach (var row in rows)
+            {
+                bool keepActive = row.Target.Length > 0
+                    || row.Status != "pending"
+                    || TextQualityClassifier.ClassifyEntry(row.Locator, row.Source, format) != StringQuality.Technical;
+                int desired = keepActive ? 1 : 2;
+                if (row.Active != desired)
+                    store.Execute("UPDATE units SET active=$a WHERE id=$id", ("$a", desired), ("$id", row.Id));
+            }
+
+            SaveFileSelection(package, saved);
+            SaveFileSelectionModes(package, modes);
+            store.Set("scan_version", Guid.NewGuid().ToString("N"));
+            store.Execute("COMMIT");
+        }
+        catch { store.Execute("ROLLBACK"); throw; }
+    }
 
     public void SetFilesIncluded(IReadOnlyDictionary<string, bool> selections)
     {
@@ -833,10 +1019,12 @@ public sealed class ProjectService(ProjectStore store)
         try
         {
             var saved = LoadFileSelection(package);
+            var modes = LoadFileSelectionModes(package);
             bool anyChanged = false;
             foreach (var (path, included) in selections)
             {
                 saved[path] = included;
+                modes.Remove(path);
                 int fromActive = included ? 2 : 1;
                 int toActive = included ? 1 : 2;
                 store.Execute("UPDATE units SET active=$to WHERE path=$p AND active=$from",
@@ -846,12 +1034,142 @@ public sealed class ProjectService(ProjectStore store)
             if (anyChanged)
             {
                 SaveFileSelection(package, saved);
+                SaveFileSelectionModes(package, modes);
                 store.Set("scan_version", Guid.NewGuid().ToString("N"));
             }
             store.Execute("COMMIT");
         }
         catch { store.Execute("ROLLBACK"); throw; }
     }
+
+    public IReadOnlyList<FileSchemaCluster> BuildSchemaClusters()
+    {
+        var files = ScannedFiles();
+        if (files.Count == 0) return [];
+        var entriesByFile = new Dictionary<string, List<(string Locator, string Source)>>(StringComparer.Ordinal);
+        foreach (var row in store.Query("""
+            SELECT path, locator, source FROM units
+            WHERE active IN (1, 2)
+            ORDER BY path, locator
+            """, r => (Path: r.GetString(0), Locator: r.GetString(1), Source: r.GetString(2))))
+        {
+            if (!entriesByFile.TryGetValue(row.Path, out var list))
+            {
+                list = [];
+                entriesByFile[row.Path] = list;
+            }
+            list.Add((row.Locator, row.Source));
+        }
+        var readonlyMap = entriesByFile.ToDictionary(
+            kv => kv.Key,
+            kv => (IReadOnlyList<(string Locator, string Source)>)kv.Value,
+            StringComparer.Ordinal);
+        return SchemaClusterer.Build(files, readonlyMap);
+    }
+
+    public ScoutApplyResult ApplyScoutPlan(
+        ScoutPlan plan,
+        IReadOnlySet<string>? selectedClusterIds = null,
+        string? password = null,
+        CancellationToken cancellation = default)
+    {
+        var clustersById = plan.AnalyzedClusters.ToDictionary(c => c.ClusterId, StringComparer.Ordinal);
+        string package = store.Get("scanned_package");
+        int appliedClusters = 0, includedFiles = 0, excludedFiles = 0, ruleFiles = 0;
+        bool needsRescan = false;
+
+        store.Execute("BEGIN IMMEDIATE");
+        try
+        {
+            var saved = LoadFileSelection(package);
+            var modes = LoadFileSelectionModes(package);
+
+            foreach (var rec in plan.Recommendations)
+            {
+                if (selectedClusterIds != null && !selectedClusterIds.Contains(rec.ClusterId))
+                    continue;
+                if (!clustersById.TryGetValue(rec.ClusterId, out var cluster))
+                    continue;
+                appliedClusters++;
+
+                if (rec.Action == "exclude")
+                {
+                    foreach (string path in cluster.FilePaths)
+                    {
+                        saved[path] = false;
+                        modes.Remove(path);
+                        store.Execute("UPDATE units SET active=2 WHERE path=$p AND active=1", ("$p", path));
+                        excludedFiles++;
+                    }
+                }
+                else if (rec.Action == "include_all")
+                {
+                    foreach (string path in cluster.FilePaths)
+                    {
+                        saved[path] = true;
+                        modes.Remove(path);
+                        var existingRule = Rules(path);
+                        if (existingRule?.FieldPatterns is { Length: > 0 })
+                        {
+                            var cleared = existingRule with { FieldPatterns = null };
+                            bool empty = cleared.Key == null && cleared.Source == null && cleared.Target == null
+                                && cleared.Sheet == null && (cleared.Fields == null || cleared.Fields.Length == 0);
+                            store.Set(RulesSetting(path), empty ? "" : JsonSerializer.Serialize(cleared));
+                            store.Execute("UPDATE files SET hash='' WHERE path=$p", ("$p", path));
+                            needsRescan = true;
+                        }
+                        store.Execute("UPDATE units SET active=1 WHERE path=$p AND active=2", ("$p", path));
+                        includedFiles++;
+                    }
+                }
+                else if (rec.Action == "include_fields" && rec.FieldPatterns.Count > 0)
+                {
+                    string[] patterns = rec.FieldPatterns.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+                    foreach (string path in cluster.FilePaths)
+                    {
+                        saved[path] = true;
+                        modes.Remove(path);
+                        var existing = Rules(path);
+                        var updated = (existing ?? new ExtractionRule()) with { FieldPatterns = patterns };
+                        string serialized = JsonSerializer.Serialize(updated);
+                        if (store.Get(RulesSetting(path)) != serialized)
+                        {
+                            store.Set(RulesSetting(path), serialized);
+                            store.Execute("UPDATE files SET hash='' WHERE path=$p", ("$p", path));
+                            needsRescan = true;
+                        }
+                        ruleFiles++;
+                        includedFiles++;
+                    }
+                }
+            }
+
+            if (appliedClusters > 0)
+            {
+                SaveFileSelection(package, saved);
+                SaveFileSelectionModes(package, modes);
+                store.Set("scan_version", Guid.NewGuid().ToString("N"));
+            }
+            store.Execute("COMMIT");
+        }
+        catch { store.Execute("ROLLBACK"); throw; }
+
+        int activeUnits;
+        if (needsRescan)
+        {
+            var scan = Scan(password, cancellation);
+            activeUnits = scan.Units;
+        }
+        else
+        {
+            activeUnits = store.Query("SELECT COUNT(*) FROM units WHERE active=1", r => r.GetInt32(0))[0];
+        }
+
+        return new ScoutApplyResult(appliedClusters, includedFiles, excludedFiles, ruleFiles, activeUnits);
+    }
+
+    public DeploymentAdvice AnalyzeDeployment(string? password = null, CancellationToken cancellation = default) =>
+        DeploymentAdvisor.Analyze(Capabilities(password, cancellation), ScannedFiles());
 
     private void StoreSlot(string id, string path, TextSlot slot, Unit? old, string engine, bool ambiguous = false, int active = 1)
     {
@@ -926,6 +1244,35 @@ public sealed class ProjectService(ProjectStore store)
             store.Get("unity_arabic_font_scale"),
             store.Get("unity_arabic_shaping"));
 
+    public const string GettextPoTargetSetting = "gettext_po_target";
+
+    private static readonly string[] CjkFontNameTokens =
+        ["cjk", "jp", "ja", "ko", "kr", "zh", "sc", "tc", "cn", "hans", "hant", "notosanssc", "notosansjp", "notosanskr"];
+
+    private static List<ResourceEntry> FindPatchableLooseUnityFonts(Source source, ResourceIndex index)
+    {
+        if (source.IsArchive || !Directory.Exists(source.Path)) return [];
+        var all = new List<ResourceEntry>();
+        foreach (var entry in index.Entries)
+        {
+            string norm = entry.Path.Replace('\\', '/');
+            if (!norm.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!norm.Contains("_Data/", StringComparison.OrdinalIgnoreCase)) continue;
+            if (norm.Contains("/MonoBleedingEdge/", StringComparison.OrdinalIgnoreCase)
+                || norm.Contains("/Plugins/", StringComparison.OrdinalIgnoreCase)
+                || norm.Contains("/Engine/", StringComparison.OrdinalIgnoreCase))
+                continue;
+            all.Add(entry);
+        }
+        if (all.Count == 0) return all;
+        var nonCjk = all.Where(e =>
+        {
+            string stem = Path.GetFileNameWithoutExtension(e.Path).ToLowerInvariant();
+            return !CjkFontNameTokens.Any(tok => stem.Contains(tok, StringComparison.Ordinal));
+        }).ToList();
+        return nonCjk.Count > 0 ? nonCjk : all;
+    }
+
     private static ResourceEntry? FindPatchableUnityTmpHost(Source source, ResourceIndex index)
     {
         if (source.IsArchive || !Directory.Exists(source.Path)) return null;
@@ -948,8 +1295,12 @@ public sealed class ProjectService(ProjectStore store)
     {
         if (store.Get("scanned_source") != source.Root || store.Get("scanned_package") != source.Package)
             throw new InvalidOperationException("افحص المصدر المحدد قبل البناء.");
-        if (store.Get("scan_errors") is not ("" or "[]"))
+        if (HasBlockingScanErrors())
             throw new InvalidOperationException("راجع تشخيصات الفحص قبل البناء.");
+        var skippedScanErrorPaths = ReadScanErrors()
+            .Select(e => e.Path)
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .ToHashSet(StringComparer.Ordinal);
         var profile = Engines.Resolve(store.Get("engine"), index.Entries.Select(entry => entry.Path).ToList(), source.Path);
         if (profile.Name != store.Get("scanned_engine"))
             throw new InvalidOperationException("تغير ملف تعريف المحرك. أعد الفحص.");
@@ -991,12 +1342,21 @@ public sealed class ProjectService(ProjectStore store)
             && !StarTruckerCatalog.IsGameArchive(source.Path)
             ? FindPatchableUnityTmpHost(source, index)
             : null;
+        var looseUnityFonts = profile.Name == "unity" && !source.IsArchive
+            && !StarTruckerCatalog.IsGameArchive(source.Path)
+            && standaloneUnityTmpHost == null
+            ? FindPatchableLooseUnityFonts(source, index)
+            : [];
+        string gettextPoTarget = store.Get(GettextPoTargetSetting).Trim();
+        var gettextPotDeliveries = new List<(string PotPath, Dictionary<string, string> EffectiveReplacements, byte[] RewrittenPotBytes)>();
         foreach (var entry in index.Entries)
         {
             cancellation.ThrowIfCancellationRequested();
             var format = source.FormatFor(entry.Path);
             if (format == null) continue;
             string key = source.Key(entry.Path);
+            if (!scanned.ContainsKey(key) && skippedScanErrorPaths.Contains(key))
+                continue;
             var selected = units[key];
             bool displaySupported = false;
             if (format is StarTruckerCatalog && selected.Any(unit => StarTruckerDisplay.HasArabic(unit.Target)))
@@ -1140,13 +1500,15 @@ public sealed class ProjectService(ProjectStore store)
                 throw new InvalidOperationException("تغير المورد منذ الفحص — " + key);
             expected[entry.Path] = before;
             if (original == null) continue;
+            bool hasUnityFontTarget = standaloneUnityTmpHost != null || looseUnityFonts.Count > 0;
             bool shapeBundleOrLooseUnity = profile.Name == "unity" && !source.IsArchive
-                && standaloneUnityTmpHost != null && !hasI2InIndex && unityDisplay.ShapeArabic
+                && hasUnityFontTarget && !hasI2InIndex && unityDisplay.ShapeArabic
                 && replacements.Values.Any(StarTruckerDisplay.HasArabic);
             if (profile.Name == "unity" && !source.IsArchive && replacements.Values.Any(StarTruckerDisplay.HasArabic))
                 anyNonI2UnityArabic = true;
 
             byte[] rewritten;
+            Dictionary<string, string> effectiveReplacements = replacements;
             if (format is UnityBundleFormat bundleFmt && shapeBundleOrLooseUnity)
             {
                 rewritten = bundleFmt.ApplyWithDisplay(original, replacements, unityDisplay);
@@ -1156,11 +1518,23 @@ public sealed class ProjectService(ProjectStore store)
                 var shapedMap = new Dictionary<string, string>(replacements.Count, StringComparer.Ordinal);
                 foreach (var (loc, val) in replacements)
                     shapedMap[loc] = unityDisplay.TransformArabic(val);
+                effectiveReplacements = shapedMap;
                 rewritten = Formats.Apply(original, format, shapedMap, Rules(key));
             }
             else
             {
                 rewritten = Formats.Apply(original, format, replacements, Rules(key));
+            }
+            bool redirectingPotToSiblingPo = format is PoFormat && !source.IsArchive && IsGettextTemplate(key)
+                && gettextPoTarget.Length > 0
+                && !gettextPoTarget.Equals("pot-only", StringComparison.OrdinalIgnoreCase)
+                && !gettextPoTarget.Equals("export-ar", StringComparison.OrdinalIgnoreCase);
+            if (format is PoFormat && !source.IsArchive && IsGettextTemplate(key)
+                && gettextPoTarget.Length > 0
+                && !gettextPoTarget.Equals("pot-only", StringComparison.OrdinalIgnoreCase))
+            {
+                gettextPotDeliveries.Add((entry.Path, effectiveReplacements, rewritten));
+                if (redirectingPotToSiblingPo) continue;
             }
             string after = Identity.Hash(rewritten);
             if (before == after) continue;
@@ -1180,6 +1554,51 @@ public sealed class ProjectService(ProjectStore store)
         }
         if (expected.Count != scanned.Count || expected.Count == 0)
             throw new InvalidOperationException("تغيرت قائمة الموارد أو لم يُعثر على موارد مدعومة. أعد الفحص.");
+
+        // Gettext .pot -> .po delivery (standalone Arabic .po or replacing a user-chosen sibling .po language slot)
+        bool gettextPoDelivered = false;
+        if (!source.IsArchive && gettextPotDeliveries.Count > 0)
+        {
+            var poFormat = new PoFormat();
+            foreach (var (potPath, effReplacements, rewrittenPotBytes) in gettextPotDeliveries)
+            {
+                if (gettextPoTarget.Equals("export-ar", StringComparison.OrdinalIgnoreCase))
+                {
+                    string dir = Path.GetDirectoryName(potPath)?.Replace('\\', '/') ?? "";
+                    string stem = Path.GetFileNameWithoutExtension(potPath);
+                    string dropInPath = string.IsNullOrEmpty(dir) ? $"{stem}_ar.po" : $"{dir}/{stem}_ar.po";
+                    string afterHash = Identity.Hash(rewrittenPotBytes);
+                    expected[dropInPath] = afterHash;
+                    changes.Add(new(dropInPath, "", afterHash));
+                    stageChange?.Invoke(ResourceEntry.FromBytes(dropInPath, rewrittenPotBytes), rewrittenPotBytes);
+                    gettextPoDelivered = true;
+                    string poNote = $"تم تصدير ملف Gettext عربي جاهز ({Path.GetFileName(dropInPath)}) بجانب القالب.";
+                    notice = notice.Length == 0 ? poNote : notice + "\n" + poNote;
+                }
+                else
+                {
+                    var siblingEntry = index.Entries.FirstOrDefault(e =>
+                        e.Path.Equals(gettextPoTarget, StringComparison.OrdinalIgnoreCase)
+                        || source.Key(e.Path).Equals(gettextPoTarget, StringComparison.OrdinalIgnoreCase));
+                    if (siblingEntry != null && !changes.Any(c => c.Path.Equals(siblingEntry.Path, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        byte[] siblingOrig = siblingEntry.Read(cancellation);
+                        string siblingBefore = Identity.Hash(siblingOrig);
+                        byte[] siblingRewritten = poFormat.Apply(siblingOrig, effReplacements, preserveLanguage: true);
+                        string siblingAfter = Identity.Hash(siblingRewritten);
+                        if (siblingBefore != siblingAfter)
+                        {
+                            expected[siblingEntry.Path] = siblingAfter;
+                            changes.Add(new(siblingEntry.Path, siblingBefore, siblingAfter));
+                            stageChange?.Invoke(siblingEntry, siblingRewritten);
+                            gettextPoDelivered = true;
+                            string poNote = $"تم تطبيق الترجمة العربية على ملف اللغة ({Path.GetFileName(siblingEntry.Path)}) مع الحفاظ على ترويسته الأصلية — اختر تلك اللغة من إعدادات اللعبة لتظهر العربية.";
+                            notice = notice.Length == 0 ? poNote : notice + "\n" + poNote;
+                        }
+                    }
+                }
+            }
+        }
 
         if (!source.IsArchive && unrealPatchGroups.Count > 0)
         {
@@ -1282,6 +1701,26 @@ public sealed class ProjectService(ProjectStore store)
                 unityTmpStandalonePatched = true;
             }
         }
+        bool unityLooseFontsPatched = false;
+        var patchedLooseFontNames = new List<string>();
+        ArabicFontChoice? looseFontChoice = null;
+        if (!source.IsArchive && anyNonI2UnityArabic && !unityTmpPatchedInResource && !unityTmpStandalonePatched && looseUnityFonts.Count > 0)
+        {
+            var (bilingualChoice, patchedFontBytes) = ArabicFontCatalog.ResolveBilingual(displayFont);
+            string afterFontHash = Identity.Hash(patchedFontBytes);
+            looseFontChoice = bilingualChoice;
+            foreach (var fontEntry in looseUnityFonts)
+            {
+                if (changes.Any(c => c.Path.Equals(fontEntry.Path, StringComparison.OrdinalIgnoreCase))) continue;
+                string beforeFontHash = fontEntry.Hash(cancellation);
+                if (beforeFontHash == afterFontHash) continue;
+                expected[fontEntry.Path] = afterFontHash;
+                changes.Add(new(fontEntry.Path, beforeFontHash, afterFontHash));
+                stageChange?.Invoke(fontEntry, patchedFontBytes);
+                patchedLooseFontNames.Add(Path.GetFileName(fontEntry.Path));
+                unityLooseFontsPatched = true;
+            }
+        }
         if (i2ArabicUpdated)
         {
             string shapingDesc = unityDisplay.ShapeArabic ? $"تشكيل العربية ({unityDisplay.WrapLabel})" : "عربي منطقي (RTL أصلي)";
@@ -1295,6 +1734,12 @@ public sealed class ProjectService(ProjectStore store)
                 ? $"تم تجهيز العرض العربي ({shapingDesc}) وحقن الخط الاحتياطي (TextMeshPro) تلقائياً · الخط: {displayFont.DisplayName} · الحجم: {unityDisplay.ScaleLabel}"
                 : $"تم تحديث موارد Unity (TextAsset) بنجاح.";
             notice = notice.Length == 0 ? tmpNote : notice + "\n" + tmpNote;
+        }
+        else if (unityLooseFontsPatched && looseFontChoice != null)
+        {
+            string shapingDesc = unityDisplay.ShapeArabic ? $"تشكيل العربية ({unityDisplay.WrapLabel})" : "عربي منطقي (RTL أصلي)";
+            string fontNote = $"تم حقن الخط العربي+اللاتيني الثنائي ({looseFontChoice.DisplayName}) في خطوط اللعبة ({string.Join("، ", patchedLooseFontNames)}) وتجهيز العرض ({shapingDesc}).";
+            notice = notice.Length == 0 ? fontNote : notice + "\n" + fontNote;
         }
 
         string package = source.IsArchive ? source.OutputPath : "";
@@ -1315,6 +1760,9 @@ public sealed class ProjectService(ProjectStore store)
                 i2ArabicUpdated,
                 unityAssetsArabicUpdated,
                 unityTmpStandalonePatched,
+                unityLooseFontsPatched,
+                gettextPoTarget,
+                gettextPoDelivered,
                 displayFont = displayFont.Id,
                 unityWrap = unityDisplay.WrapMode,
                 unityFontScale = unityDisplay.FontScale,
@@ -1456,18 +1904,48 @@ public sealed class ProjectService(ProjectStore store)
         }
     }
 
+    private const int DedicatedLocalizationMinHumanUnits = 20;
+
+    private static readonly HashSet<string> AmbiguousShortLocaleTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "id", "no", "it", "he", "hi"
+    };
+
+    private static readonly HashSet<string> ExplicitLocalizationDirectories = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "localization", "localisation", "locales", "locale", "lang", "languages",
+        "i18n", "l10n", "dialogues", "dialogs", "subtitles", "captions", "tl"
+    };
+
+    private static readonly HashSet<string> LocalizationContextFolders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "localization", "localisation", "locales", "locale", "lang", "languages",
+        "i18n", "l10n", "strings", "dialogues", "dialogs", "subtitles", "captions", "tl", "text"
+    };
+
+    private static readonly string[] LocalizationFileStems =
+    [
+        "strings_", "strings-", "locale_", "locale-", "lang_", "lang-",
+        "loc_", "loc-", "i18n_", "i18n-", "l10n_", "l10n-", "subtitles_", "dialogue_", "dialog_"
+    ];
+
+    private static readonly HashSet<string> DedicatedLocalizationExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".po", ".pot", ".locres", ".translation", ".xlf", ".xliff"
+    };
+
     private static readonly HashSet<string> KnownLocaleCodes = new(StringComparer.OrdinalIgnoreCase)
     {
         "en", "eng", "english", "en-us", "en-gb", "en_us", "en_gb",
         "de", "deu", "ger", "german", "de-de", "de_de",
         "fr", "fra", "fre", "french", "fr-fr", "fr_fr",
-        "es", "esp", "spa", "spanish", "es-es", "es-419", "es-mx", "es_es",
+        "es", "esp", "spa", "spanish", "es-es", "es-419", "es-mx", "es_es", "es_419", "es_mx",
         "it", "ita", "italian", "it-it", "it_it",
         "ja", "jpn", "jp", "japanese", "ja-jp", "ja_jp",
         "ko", "kor", "kr", "korean", "ko-kr", "ko_kr",
         "pt", "por", "ptb", "pt-br", "pt-pt", "pt_br", "pt_pt", "portuguese",
         "ru", "rus", "russian", "ru-ru", "ru_ru",
-        "zh", "zho", "zhs", "zht", "chs", "cht", "zh-cn", "zh-tw", "zh_cn", "zh_tw", "zh-hans", "zh-hant", "chinese",
+        "zh", "zho", "zhs", "zht", "chs", "cht", "zh-cn", "zh-tw", "zh_cn", "zh_tw", "zh-hans", "zh-hant", "zh_hans", "zh_hant", "chinese",
         "pl", "pol", "polish", "tr", "tur", "turkish", "th", "tha", "thai",
         "nl", "nld", "dutch", "sv", "swe", "swedish", "da", "dan", "danish",
         "fi", "fin", "finnish", "no", "nor", "nb", "norwegian",
@@ -1475,6 +1953,66 @@ public sealed class ProjectService(ProjectStore store)
         "uk", "ukr", "ukrainian", "vi", "vie", "vietnamese", "id", "ind", "indonesian",
         "ar", "ara", "arabic", "he", "heb", "hebrew", "el", "ell", "greek", "hi", "hin", "bg", "bul"
     };
+
+    private static string StripContainerPrefix(string resourcePath)
+    {
+        int bar = resourcePath.LastIndexOf(" | ", StringComparison.Ordinal);
+        return (bar >= 0 ? resourcePath[(bar + 3)..] : resourcePath).Replace('\\', '/');
+    }
+
+    internal static bool IsDedicatedLocalizationFormat(string resourcePath, string formatName)
+    {
+        if (formatName is "po" or "unreal-locres" or "unreal-pak" or "unity-i2" or "unity-bundle"
+            or "godot-translation" or "renpy-template" or "xunity-autotranslator" or "star-trucker-catalog")
+            return true;
+        if (formatName == "xml/xliff")
+        {
+            string ext = Path.GetExtension(StripContainerPrefix(resourcePath));
+            return ext.Equals(".xlf", StringComparison.OrdinalIgnoreCase)
+                || ext.Equals(".xliff", StringComparison.OrdinalIgnoreCase);
+        }
+        return false;
+    }
+
+    internal static bool IsExplicitLocalizationDirectory(string resourcePath)
+    {
+        string[] parts = StripContainerPrefix(resourcePath).Split('/', StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < parts.Length - 1; i++)
+        {
+            if (ExplicitLocalizationDirectories.Contains(parts[i]))
+                return true;
+        }
+        return false;
+    }
+
+    private static bool IsLocalizationContextPath(string normalizedInnerPath)
+    {
+        string[] parts = normalizedInnerPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < parts.Length - 1; i++)
+        {
+            if (LocalizationContextFolders.Contains(parts[i]))
+                return true;
+        }
+        string fileName = parts.Length > 0 ? parts[^1] : "";
+        foreach (string stem in LocalizationFileStems)
+        {
+            if (fileName.StartsWith(stem, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    public static bool IsGettextTemplate(string resourcePath)
+    {
+        string p = StripContainerPrefix(resourcePath);
+        if (!Path.GetExtension(p).Equals(".pot", StringComparison.OrdinalIgnoreCase))
+            return false;
+        string? locale = ExtractPathLocale(resourcePath);
+        return locale == null || IsEnglishLocaleCode(locale);
+    }
+
+    internal static bool IsPrimaryLocaleSource(string resourcePath) =>
+        IsEnglishLocaleCode(ExtractPathLocale(resourcePath)) || IsGettextTemplate(resourcePath);
 
     private static string? FindMainGodotPck(string root, CancellationToken cancellation)
     {
@@ -1515,8 +2053,7 @@ public sealed class ProjectService(ProjectStore store)
 
     internal static string? ExtractPathLocale(string resourcePath)
     {
-        int bar = resourcePath.LastIndexOf(" | ", StringComparison.Ordinal);
-        string p = (bar >= 0 ? resourcePath[(bar + 3)..] : resourcePath).Replace('\\', '/');
+        string p = StripContainerPrefix(resourcePath);
         string[] parts = p.Split('/', StringSplitOptions.RemoveEmptyEntries);
         for (int i = 0; i < parts.Length - 1; i++)
         {
@@ -1525,12 +2062,46 @@ public sealed class ProjectService(ProjectStore store)
                 return seg;
         }
         string fileNoExt = Path.GetFileNameWithoutExtension(p);
+        if (KnownLocaleCodes.Contains(fileNoExt))
+            return fileNoExt;
+
         int dot = fileNoExt.LastIndexOf('.');
         if (dot >= 0 && dot + 1 < fileNoExt.Length)
         {
             string suffix = fileNoExt[(dot + 1)..];
             if (KnownLocaleCodes.Contains(suffix))
                 return suffix;
+        }
+
+        string[] tokens = fileNoExt.Split(['_', '-', '.'], StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length >= 2)
+        {
+            // Compound BCP-47 locale pairs (e.g. zh_cn, pt_br, en_us, zh-hans) are unambiguous anywhere in the filename.
+            for (int i = tokens.Length - 2; i >= 0; i--)
+            {
+                string pair = tokens[i] + "_" + tokens[i + 1];
+                if (KnownLocaleCodes.Contains(pair))
+                    return pair;
+            }
+
+            string ext = Path.GetExtension(p);
+            bool dedicatedExt = DedicatedLocalizationExtensions.Contains(ext);
+            bool inLocContext = dedicatedExt || IsLocalizationContextPath(p);
+            for (int i = tokens.Length - 1; i >= 0; i--)
+            {
+                string tok = tokens[i];
+                if (!KnownLocaleCodes.Contains(tok)) continue;
+                // Full language names (e.g. english, french, korean, russian) are unambiguous anywhere.
+                if (tok.Length >= 5)
+                    return tok;
+                if (!inLocContext) continue;
+                if (tok.Length >= 3)
+                    return tok;
+                if (!AmbiguousShortLocaleTokens.Contains(tok))
+                    return tok;
+                if (dedicatedExt && i == tokens.Length - 1)
+                    return tok;
+            }
         }
         return null;
     }

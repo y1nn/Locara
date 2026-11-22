@@ -740,6 +740,13 @@
           <TextBlock Text="يمنع الالتفاف الذكي انقلاب الفقرات العربية الطويلة من أسفل لأعلى داخل بطاقات Unity TMP، ويُحفظ تلقائياً للمشروع ويُطبّق عند التجربة أو التثبيت الدائم." FontSize="11" Foreground="#4B6266" TextWrapping="Wrap" Margin="0,2,0,0"/>
          </StackPanel>
         </Border>
+        <Border x:Name="GettextPoTargetBorder" Visibility="Collapsed" Background="#F4F8F7" BorderBrush="#D5E3DF" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,10,0,0">
+         <StackPanel>
+          <TextBlock Text="تطبيق ترجمة قالب Gettext (.pot → .po):" FontWeight="SemiBold" Foreground="#174B45" FontSize="13" Margin="0,0,0,6"/>
+          <ComboBox x:Name="GettextPoTargetSelector" SelectionChanged="SelectGettextPoTarget" FontSize="12" Padding="8,5" Margin="0,0,0,4" AutomationProperties.Name="هدف تصدير ملف Gettext PO"/>
+          <TextBlock x:Name="GettextPoTargetHint" Text="معظم ألعاب Gettext تقرأ الترجمة من ملف (.po) مثبّت وليس من قالب (.pot) مباشرة؛ اختر استبدال إحدى اللغات المثبّتة ثم اخترها من إعدادات اللعبة، مع نسخة احتياطية كاملة للاستعادة." FontSize="11" Foreground="#4B6266" TextWrapping="Wrap" Margin="0,2,0,0"/>
+         </StackPanel>
+        </Border>
        </StackPanel>
       </Border>
 
@@ -855,23 +862,47 @@
       <Grid>
        <Grid.RowDefinitions>
         <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
         <RowDefinition Height="*"/>
         <RowDefinition Height="Auto"/>
        </Grid.RowDefinitions>
 
-       <DockPanel Margin="0,0,0,8">
+       <DockPanel Margin="0,0,0,6">
         <StackPanel DockPanel.Dock="Right">
          <TextBlock Text="ملفات النصوص المكتشفة (حماية ما قبل الترجمة)" FontSize="16" FontWeight="SemiBold" Margin="0"/>
          <TextBlock x:Name="FilesSelectionSummary" Text="اضغط «فحص الملفات» لاستعراض الملفات ومعاينة نصوصها." FontSize="12" Foreground="#496165" Margin="0,2,0,0"/>
         </StackPanel>
         <WrapPanel HorizontalAlignment="Left" VerticalAlignment="Center">
+         <Button x:Name="RunAiScoutButton" Content="تحليل ذكي (AI Scout)" Click="RunAiScout" Background="#1B4F72" Foreground="White" FontSize="12" Padding="10,5" ToolTip="يحلّل المجموعات المختلطة بملخّص مضغوط جداً ويقترح قواعد استخراج دقيقة"/>
          <Button Content="الموصى به فقط" Click="SelectRecommendedScannedFiles" Background="#17645E" Foreground="White" FontSize="12" Padding="10,5"/>
          <Button Content="تحديد الكل" Click="SelectAllScannedFiles" FontSize="12" Padding="10,5"/>
          <Button Content="إلغاء الكل" Click="DeselectAllScannedFiles" FontSize="12" Padding="10,5"/>
         </WrapPanel>
        </DockPanel>
 
-       <DataGrid Grid.Row="1" x:Name="ScannedFilesGrid" AutoGenerateColumns="False" CanUserAddRows="False" SelectionMode="Single" HeadersVisibility="Column" GridLinesVisibility="Horizontal" RowHeight="36" Background="White" BorderBrush="#D2DFDC" FontSize="13" SelectionChanged="SelectScannedFileRow">
+       <!-- Filter & Search Bar -->
+       <Grid Grid.Row="1" Margin="0,0,0,8">
+        <Grid.ColumnDefinitions>
+         <ColumnDefinition Width="Auto"/>
+         <ColumnDefinition Width="*"/>
+         <ColumnDefinition Width="Auto"/>
+         <ColumnDefinition Width="195"/>
+        </Grid.ColumnDefinitions>
+        <TextBlock Text="بحث في الملفات:" VerticalAlignment="Center" FontSize="12" Foreground="#496165" Margin="0,0,8,0"/>
+        <TextBox Grid.Column="1" x:Name="FilesSearchBox" Padding="8,4" FontSize="12" FlowDirection="LeftToRight" TextChanged="FilterScannedFilesChanged" Margin="0,0,12,0" ToolTip="ابحث باسم الملف أو الصيغة أو جزء من العينة"/>
+        <TextBlock Grid.Column="2" Text="التصنيف:" VerticalAlignment="Center" FontSize="12" Foreground="#496165" Margin="0,0,8,0"/>
+        <ComboBox Grid.Column="3" x:Name="FilesVerdictFilter" FontSize="12" Padding="6,4" SelectionChanged="FilterScannedFilesChanged" SelectedIndex="0">
+         <ComboBoxItem Content="الكل" Tag="all"/>
+         <ComboBoxItem Content="المفعّل للترجمة فقط" Tag="included"/>
+         <ComboBoxItem Content="قابل للترجمة" Tag="translatable"/>
+         <ComboBoxItem Content="مختلط — راجع العينة" Tag="mixed"/>
+         <ComboBoxItem Content="بيانات جانبية" Tag="auxiliary"/>
+         <ComboBoxItem Content="لغة إضافية" Tag="secondary"/>
+         <ComboBoxItem Content="تقني / برمجي" Tag="technical"/>
+        </ComboBox>
+       </Grid>
+
+       <DataGrid Grid.Row="2" x:Name="ScannedFilesGrid" AutoGenerateColumns="False" CanUserAddRows="False" SelectionMode="Single" HeadersVisibility="Column" GridLinesVisibility="Horizontal" RowHeight="36" Background="White" BorderBrush="#D2DFDC" FontSize="13" SelectionChanged="SelectScannedFileRow">
         <DataGrid.Columns>
          <DataGridTemplateColumn Header="تضمين" Width="62">
           <DataGridTemplateColumn.CellTemplate>
@@ -892,7 +923,7 @@
           </DataGridTextColumn.ElementStyle>
          </DataGridTextColumn>
          <DataGridTextColumn Header="الصيغة" Binding="{Binding Format}" IsReadOnly="True" Width="82"/>
-         <DataGridTextColumn Header="النصوص" Binding="{Binding UnitsSummary}" IsReadOnly="True" Width="105"/>
+         <DataGridTextColumn Header="النصوص" Binding="{Binding UnitsSummary}" IsReadOnly="True" Width="120"/>
          <DataGridTemplateColumn Header="التصنيف الذكي" IsReadOnly="True" Width="148">
           <DataGridTemplateColumn.CellTemplate>
            <DataTemplate>
@@ -916,9 +947,12 @@
        </DataGrid>
 
        <!-- Selected File Sample Preview -->
-       <Border Grid.Row="2" Background="#F4F8F7" BorderBrush="#D5E3DF" BorderThickness="1" CornerRadius="8" Padding="10,8" Margin="0,8,0,0">
+       <Border Grid.Row="3" Background="#F4F8F7" BorderBrush="#D5E3DF" BorderThickness="1" CornerRadius="8" Padding="10,8" Margin="0,8,0,0">
         <StackPanel>
-         <TextBlock x:Name="SelectedFilePathText" Text="اختر ملفاً من الجدول أعلاه لمعاينة أول 5 نصوص فيه قبل الترجمة." FontWeight="SemiBold" FontSize="12" Foreground="#143C42" TextTrimming="CharacterEllipsis" Margin="0"/>
+         <DockPanel Margin="0,0,0,2">
+          <Button x:Name="IncludeHumanOnlyButton" DockPanel.Dock="Left" Content="تفعيل النصوص البشرية فقط في هذا الملف" Click="IncludeHumanOnlySelectedFile" Visibility="Collapsed" Background="#17645E" Foreground="White" FontSize="11" Padding="9,4" Margin="0,0,8,0"/>
+          <TextBlock x:Name="SelectedFilePathText" Text="اختر ملفاً من الجدول أعلاه لمعاينة أول 5 نصوص فيه قبل الترجمة." FontWeight="SemiBold" FontSize="12" Foreground="#143C42" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0"/>
+         </DockPanel>
          <TextBlock x:Name="SelectedFileReasonText" FontSize="12" TextWrapping="Wrap" Margin="0,2,0,4"/>
          <TextBox x:Name="SelectedFileSamplesText" FlowDirection="LeftToRight" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent" FontSize="12" Foreground="#243C42" MaxHeight="96" VerticalScrollBarVisibility="Auto" Padding="0" Margin="0"/>
         </StackPanel>

@@ -429,8 +429,9 @@ public sealed class ProjectStore : IDisposable
     private Action WriteEdit(Unit unit, bool approve, bool pendingOnly)
     {
         string warning = Tokens.Validate(unit.Source, unit.Target, Get("scanned_engine"));
-        if (approve && (warning.Length > 0 || string.IsNullOrWhiteSpace(unit.Target))) throw new InvalidDataException("تعذّر الاعتماد. " + warning);
-        string status = approve ? "approved" : string.IsNullOrWhiteSpace(unit.Target) ? "pending" : "translated";
+        bool blankAllowed = string.IsNullOrWhiteSpace(unit.Source) && unit.Target == unit.Source;
+        if (approve && (warning.Length > 0 || (string.IsNullOrWhiteSpace(unit.Target) && !blankAllowed))) throw new InvalidDataException("تعذّر الاعتماد. " + warning);
+        string status = approve ? "approved" : (string.IsNullOrWhiteSpace(unit.Target) && !blankAllowed) ? "pending" : "translated";
         Execute("""
             UPDATE units SET target=$t,status=$s,warning=$w,revision=revision+1
             WHERE id=$i AND revision=$rev AND source=$o AND active=1 AND ($pending=0 OR status='pending')

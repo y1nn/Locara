@@ -10,12 +10,15 @@ public partial class MainWindow
 {
     private static readonly SolidColorBrush VerdictGreen = new(Color.FromRgb(0x14, 0x63, 0x56));
     private static readonly SolidColorBrush VerdictAmber = new(Color.FromRgb(0x9A, 0x5B, 0x00));
+    private static readonly SolidColorBrush VerdictMuted = new(Color.FromRgb(0x5A, 0x6D, 0x73));
     private static readonly SolidColorBrush VerdictSlate = new(Color.FromRgb(0x4A, 0x65, 0x72));
     private static readonly SolidColorBrush VerdictRed = new(Color.FromRgb(0xA9, 0x32, 0x26));
 
     private sealed class ScannedFileRow(FileQualitySummary summary) : INotifyPropertyChanged
     {
         private bool included = summary.Included;
+        private int includedUnits = summary.IncludedUnits;
+        private bool humanOnlyFilter = summary.HumanOnlyFilter;
         public event PropertyChangedEventHandler? PropertyChanged;
 
         public string Path => summary.Path;
@@ -23,6 +26,8 @@ public partial class MainWindow
         public int TotalUnits => summary.TotalUnits;
         public int PendingUnits => summary.PendingUnits;
         public int ApprovedUnits => summary.ApprovedUnits;
+        public int HumanCount => summary.HumanCount;
+        public int TechnicalCount => summary.TechnicalCount;
         public FileQualityVerdict Verdict => summary.Verdict;
         public string Reason => summary.Reason;
         public IReadOnlyList<string> Samples => summary.Samples;
@@ -35,17 +40,51 @@ public partial class MainWindow
                 if (included == value) return;
                 included = value;
                 PropertyChanged?.Invoke(this, new(nameof(Included)));
+                PropertyChanged?.Invoke(this, new(nameof(UnitsSummary)));
             }
         }
 
-        public string UnitsSummary => summary.ApprovedUnits > 0
-            ? $"{summary.TotalUnits:N0} ({summary.ApprovedUnits:N0} معتمد)"
-            : $"{summary.TotalUnits:N0}";
+        public int IncludedUnits
+        {
+            get => includedUnits;
+            set
+            {
+                if (includedUnits == value) return;
+                includedUnits = value;
+                PropertyChanged?.Invoke(this, new(nameof(IncludedUnits)));
+                PropertyChanged?.Invoke(this, new(nameof(UnitsSummary)));
+            }
+        }
+
+        public bool HumanOnlyFilter
+        {
+            get => humanOnlyFilter;
+            set
+            {
+                if (humanOnlyFilter == value) return;
+                humanOnlyFilter = value;
+                PropertyChanged?.Invoke(this, new(nameof(HumanOnlyFilter)));
+                PropertyChanged?.Invoke(this, new(nameof(UnitsSummary)));
+            }
+        }
+
+        public string UnitsSummary
+        {
+            get
+            {
+                if (included && humanOnlyFilter && includedUnits < summary.TotalUnits)
+                    return $"{includedUnits:N0}/{summary.TotalUnits:N0} (بشري)";
+                return summary.ApprovedUnits > 0
+                    ? $"{summary.TotalUnits:N0} ({summary.ApprovedUnits:N0} معتمد)"
+                    : $"{summary.TotalUnits:N0}";
+            }
+        }
 
         public string VerdictLabel => summary.Verdict switch
         {
             FileQualityVerdict.Translatable => "قابل للترجمة",
             FileQualityVerdict.Mixed => "مختلط — راجع العينة",
+            FileQualityVerdict.AuxiliaryData => "بيانات جانبية",
             FileQualityVerdict.SecondaryLanguage => "لغة إضافية",
             _ => "تقني / برمجي"
         };
@@ -54,6 +93,7 @@ public partial class MainWindow
         {
             FileQualityVerdict.Translatable => VerdictGreen,
             FileQualityVerdict.Mixed => VerdictAmber,
+            FileQualityVerdict.AuxiliaryData => VerdictMuted,
             FileQualityVerdict.SecondaryLanguage => VerdictSlate,
             _ => VerdictRed
         };
@@ -66,6 +106,50 @@ public partial class MainWindow
     private int filesRefreshRequest;
     private bool updatingFileSelection;
     private List<ScannedFileRow> currentScannedFiles = [];
+
+    private void FilterScannedFilesChanged(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        ApplyScannedFilesFilter();
+    }
+
+    private void ApplyScannedFilesFilter(string? preferredPath = null)
+    {
+        string query = (FilesSearchBox?.Text ?? "").Trim();
+        string tag = ((FilesVerdictFilter?.SelectedItem as ComboBoxItem)?.Tag as string) ?? "all";
+        string? selectedPath = preferredPath ?? (ScannedFilesGrid.SelectedItem as ScannedFileRow)?.Path;
+
+        var filtered = currentScannedFiles.Where(row =>
+        {
+            bool verdictOk = tag switch
+            {
+                "included" => row.Included,
+                "translatable" => row.Verdict == FileQualityVerdict.Translatable,
+                "mixed" => row.Verdict == FileQualityVerdict.Mixed,
+                "auxiliary" => row.Verdict == FileQualityVerdict.AuxiliaryData,
+                "secondary" => row.Verdict == FileQualityVerdict.SecondaryLanguage,
+                "technical" => row.Verdict == FileQualityVerdict.Technical,
+                _ => true
+            };
+            if (!verdictOk) return false;
+            if (query.Length == 0) return true;
+            return row.Path.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || row.Format.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || row.SamplesPreview.Contains(query, StringComparison.OrdinalIgnoreCase);
+        }).ToList();
+
+        updatingFileSelection = true;
+        try
+        {
+            ScannedFilesGrid.ItemsSource = filtered;
+            var toSelect = selectedPath != null
+                ? filtered.FirstOrDefault(r => r.Path == selectedPath)
+                : filtered.FirstOrDefault();
+            ScannedFilesGrid.SelectedItem = toSelect;
+            UpdateSelectedFilePreview(toSelect);
+        }
+        finally { updatingFileSelection = false; }
+    }
 
     private async void RefreshScannedFiles()
     {
@@ -91,18 +175,7 @@ public partial class MainWindow
 
             string? previousSelected = (ScannedFilesGrid.SelectedItem as ScannedFileRow)?.Path;
             currentScannedFiles = summaries.Select(s => new ScannedFileRow(s)).ToList();
-            updatingFileSelection = true;
-            try
-            {
-                ScannedFilesGrid.ItemsSource = currentScannedFiles;
-                var toSelect = previousSelected != null
-                    ? currentScannedFiles.FirstOrDefault(r => r.Path == previousSelected)
-                    : currentScannedFiles.FirstOrDefault();
-                ScannedFilesGrid.SelectedItem = toSelect;
-                UpdateSelectedFilePreview(toSelect);
-            }
-            finally { updatingFileSelection = false; }
-
+            ApplyScannedFilesFilter(previousSelected);
             UpdateFilesSummaryAndGuards();
         }
         catch (Exception error)
@@ -123,40 +196,56 @@ public partial class MainWindow
         }
 
         int includedFiles = currentScannedFiles.Count(f => f.Included);
-        int includedUnits = currentScannedFiles.Where(f => f.Included).Sum(f => f.TotalUnits);
+        int includedUnits = currentScannedFiles.Where(f => f.Included).Sum(f => f.IncludedUnits);
+        int totalUnits = currentScannedFiles.Sum(f => f.TotalUnits);
         int excludedFiles = currentScannedFiles.Count - includedFiles;
-        int excludedUnits = currentScannedFiles.Where(f => !f.Included).Sum(f => f.TotalUnits);
-        int flaggedIncluded = currentScannedFiles.Count(f => f.Included && f.Verdict is FileQualityVerdict.Mixed or FileQualityVerdict.Technical);
+        int excludedUnits = Math.Max(0, totalUnits - includedUnits);
+        int flaggedIncluded = currentScannedFiles.Count(f => f.Included && !f.HumanOnlyFilter
+            && f.Verdict is FileQualityVerdict.Mixed or FileQualityVerdict.Technical);
         int technicalExcluded = currentScannedFiles.Count(f => !f.Included && f.Verdict == FileQualityVerdict.Technical);
+        int mixedExcluded = currentScannedFiles.Count(f => !f.Included && f.Verdict == FileQualityVerdict.Mixed);
+        int auxiliaryExcluded = currentScannedFiles.Count(f => !f.Included && f.Verdict == FileQualityVerdict.AuxiliaryData);
         int secondaryExcluded = currentScannedFiles.Count(f => !f.Included && f.Verdict == FileQualityVerdict.SecondaryLanguage);
+        bool hasPotOnlyWithSiblingPo = currentScannedFiles.Any(f => f.Included && f.Format == "po" && ProjectService.IsGettextTemplate(f.Path))
+            && !currentScannedFiles.Any(f => f.Included && f.Format == "po" && !ProjectService.IsGettextTemplate(f.Path))
+            && currentScannedFiles.Any(f => !f.Included && f.Format == "po" && !ProjectService.IsGettextTemplate(f.Path));
 
-        FilesSelectionSummary.Text = excludedFiles == 0
+        FilesSelectionSummary.Text = excludedFiles == 0 && excludedUnits == 0
             ? $"المفعّل للترجمة: {includedFiles:N0} ملف ({includedUnits:N0} نص)"
             : $"المفعّل للترجمة: {includedFiles:N0} ملف ({includedUnits:N0} نص)  ·  المستبعد: {excludedFiles:N0} ملف ({excludedUnits:N0} نص)";
 
         if (includedFiles == 0 && excludedFiles > 0)
         {
             FilesGuardBanner.Visibility = Visibility.Visible;
-            FilesGuardTitle.Text = $"استُبعدت جميع الملفات المكتشفة ({excludedFiles:N0} ملف تقني/غير محدد) لحماية رصيدك";
-            FilesGuardDetail.Text = "لم تُعثر على نصوص بشرية واضحة في الملفات المفحوصة. افتح تبويب «الملفات» لمعاينة العينات أو تحديد ملفات يدوياً.";
+            FilesGuardTitle.Text = $"استُبعدت جميع الملفات المكتشفة ({excludedFiles:N0} ملف تقني/مختلط/غير محدد) لحماية رصيدك";
+            FilesGuardDetail.Text = "لم تُعثر على ملفات نصوص بشرية صافية تلقائياً. افتح تبويب «الملفات» لتشغيل «تحليل ذكي (AI Scout)» أو معاينة العينات وتفعيل النصوص البشرية فقط.";
             TranslationFilesGuardText.Text = $"تنبيه: لا توجد ملفات مفعّلة للترجمة حالياً ({excludedFiles:N0} ملف مستبعد).";
         }
-        else if (flaggedIncluded > 0 || technicalExcluded > 0 || secondaryExcluded > 0)
+        else if (flaggedIncluded > 0 || technicalExcluded > 0 || mixedExcluded > 0 || auxiliaryExcluded > 0 || secondaryExcluded > 0 || hasPotOnlyWithSiblingPo)
         {
             FilesGuardBanner.Visibility = Visibility.Visible;
             var parts = new List<string>();
+            if (auxiliaryExcluded > 0)
+                parts.Add($"استُبعد {auxiliaryExcluded:N0} ملف بيانات جانبي لوجود ملفات ترجمة رسمية");
+            if (mixedExcluded > 0)
+                parts.Add($"استُبعد {mixedExcluded:N0} ملف مختلط افتراضياً لحماية اللعبة");
             if (technicalExcluded > 0)
-                parts.Add($"تم استبعاد {technicalExcluded:N0} ملف تقني تلقائياً لتوفير رصيدك");
+                parts.Add($"استُبعد {technicalExcluded:N0} ملف تقني تلقائياً");
             if (secondaryExcluded > 0)
-                parts.Add($"تم استبعاد {secondaryExcluded:N0} حزمة لغة إضافية تلقائياً للاكتفاء بالإنجليزية");
+                parts.Add($"استُبعد {secondaryExcluded:N0} ملف لغة إضافية للاكتفاء بالإنجليزية");
             if (flaggedIncluded > 0)
-                parts.Add($"يوجد {flaggedIncluded:N0} ملف مفعّل بتصنيف مختلط أو تقني — يُنصح بمراجعة عيناته");
+                parts.Add($"يوجد {flaggedIncluded:N0} ملف مفعّل بتصنيف مختلط أو تقني — يُنصح باستخدام «تحليل ذكي (AI Scout)» أو «تفعيل النصوص البشرية فقط»");
+            if (hasPotOnlyWithSiblingPo)
+                parts.Add("ملاحظة Gettext: النصوص الحالية في قالب (.pot) ومعظم الألعاب تقرأ ملف (.po) عند التثبيت");
             FilesGuardTitle.Text = "حماية ما قبل الترجمة (فحص جودة الملفات)";
             FilesGuardDetail.Text = string.Join(" · ", parts) + ".";
-            TranslationFilesGuardText.Text = $"الملفات المفعّلة: {includedFiles:N0}/{currentScannedFiles.Count:N0} ({includedUnits:N0} نص)"
-                + (flaggedIncluded > 0 ? $" · تنبيه: {flaggedIncluded:N0} ملف مختلط/تقني مفعّل" : "")
-                + (secondaryExcluded > 0 ? $" · استُبعد {secondaryExcluded:N0} لغة إضافية تلقائياً" : "")
-                + (technicalExcluded > 0 ? $" · استُبعد {technicalExcluded:N0} ملف تقني تلقائياً" : "");
+            var brief = new List<string> { $"الملفات المفعّلة: {includedFiles:N0}/{currentScannedFiles.Count:N0} ({includedUnits:N0} نص)" };
+            if (flaggedIncluded > 0) brief.Add($"تنبيه: {flaggedIncluded:N0} ملف مختلط/تقني مفعّل");
+            if (auxiliaryExcluded > 0) brief.Add($"استُبعد {auxiliaryExcluded:N0} بيانات جانبية");
+            if (mixedExcluded > 0) brief.Add($"استُبعد {mixedExcluded:N0} مختلط");
+            if (secondaryExcluded > 0) brief.Add($"استُبعد {secondaryExcluded:N0} لغة إضافية");
+            if (technicalExcluded > 0) brief.Add($"استُبعد {technicalExcluded:N0} تقني");
+            TranslationFilesGuardText.Text = string.Join(" · ", brief);
         }
         else
         {
@@ -178,15 +267,46 @@ public partial class MainWindow
             SelectedFilePathText.Text = "اختر ملفاً من الجدول أعلاه لمعاينة أول 5 نصوص فيه قبل الترجمة.";
             SelectedFileReasonText.Text = "";
             SelectedFileSamplesText.Text = "";
+            if (IncludeHumanOnlyButton != null) IncludeHumanOnlyButton.Visibility = Visibility.Collapsed;
             return;
         }
 
         SelectedFilePathText.Text = $"{row.Path}  [{row.Format}]  ·  {row.UnitsSummary} نص";
-        SelectedFileReasonText.Text = $"التصنيف: {row.VerdictLabel} — {row.Reason}";
+        SelectedFileReasonText.Text = row.HumanOnlyFilter
+            ? $"التصنيف: {row.VerdictLabel} — مُفعّل بوضع «النصوص البشرية فقط» ({row.IncludedUnits:N0} من {row.TotalUnits:N0} نص، مع حماية القيم التقنية)."
+            : $"التصنيف: {row.VerdictLabel} — {row.Reason}";
         SelectedFileReasonText.Foreground = row.VerdictBrush;
         SelectedFileSamplesText.Text = row.Samples.Count == 0
             ? "(لا توجد نصوص مستخرجة في هذا الملف)"
             : string.Join('\n', row.Samples.Select((s, i) => $"{i + 1}. {s}"));
+
+        if (IncludeHumanOnlyButton != null)
+        {
+            bool canFilterHuman = row.HumanCount > 0 && row.TechnicalCount > 0 && (!row.Included || !row.HumanOnlyFilter);
+            IncludeHumanOnlyButton.Visibility = canFilterHuman ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    private async void IncludeHumanOnlySelectedFile(object sender, RoutedEventArgs e)
+    {
+        if (projectPath == null || work != null || ScannedFilesGrid.SelectedItem is not ScannedFileRow row) return;
+        string path = projectPath;
+        try
+        {
+            await Task.Run(() =>
+            {
+                using var store = new ProjectStore(path);
+                new ProjectService(store).SetFileIncluded(row.Path, included: true, humanOnly: true);
+            });
+            Status.Text = $"تم تفعيل النصوص البشرية فقط في «{row.Path}» وحماية القيم التقنية من التعديل.";
+            RefreshScannedFiles();
+            await RefreshRows();
+            UpdateOverview();
+        }
+        catch (Exception error)
+        {
+            Status.Text = error.Message;
+        }
     }
 
     private async void ToggleScannedFile(object sender, RoutedEventArgs e)
@@ -195,6 +315,8 @@ public partial class MainWindow
         if (sender is not CheckBox cb || cb.DataContext is not ScannedFileRow row) return;
         bool included = cb.IsChecked == true;
         row.Included = included;
+        row.HumanOnlyFilter = false;
+        row.IncludedUnits = included ? row.TotalUnits : 0;
 
         string path = projectPath;
         try
@@ -216,6 +338,7 @@ public partial class MainWindow
         {
             row.Included = !included;
             Status.Text = error.Message;
+            RefreshScannedFiles();
         }
     }
 
@@ -223,8 +346,8 @@ public partial class MainWindow
         await ApplyBulkFileSelection(_ => true, "تم تفعيل جميع الملفات للترجمة.");
 
     private async void SelectRecommendedScannedFiles(object sender, RoutedEventArgs e) =>
-        await ApplyBulkFileSelection(f => f.Verdict is FileQualityVerdict.Translatable or FileQualityVerdict.Mixed,
-            "تم تحديد الملفات الأساسية القابلة للترجمة فقط واستبعاد الملفات التقنية واللغات الإضافية.");
+        await ApplyBulkFileSelection(f => f.Verdict == FileQualityVerdict.Translatable,
+            "تم تحديد الملفات القابلة للترجمة الصافية فقط واستبعاد الملفات المختلطة والجانبية والتقنية واللغات الإضافية.");
 
     private async void DeselectAllScannedFiles(object sender, RoutedEventArgs e) =>
         await ApplyBulkFileSelection(_ => false, "تم إلغاء تحديد جميع الملفات.");
@@ -238,6 +361,8 @@ public partial class MainWindow
         {
             bool next = predicate(row);
             row.Included = next;
+            row.HumanOnlyFilter = false;
+            row.IncludedUnits = next ? row.TotalUnits : 0;
             map[row.Path] = next;
         }
 
@@ -249,6 +374,7 @@ public partial class MainWindow
                 new ProjectService(store).SetFilesIncluded(map);
             });
             UpdateFilesSummaryAndGuards();
+            UpdateSelectedFilePreview(ScannedFilesGrid.SelectedItem as ScannedFileRow);
             Status.Text = message;
             await RefreshRows();
             UpdateOverview();
@@ -257,6 +383,85 @@ public partial class MainWindow
         {
             Status.Text = error.Message;
             RefreshScannedFiles();
+        }
+    }
+
+    private async void RunAiScout(object sender, RoutedEventArgs e)
+    {
+        if (projectPath is not { } path || work != null) return;
+        if (currentScannedFiles.Count == 0)
+        {
+            Status.Text = "افحص ملفات اللعبة أولاً قبل تشغيل كشّاف الذكاء الاصطناعي.";
+            return;
+        }
+        ProviderOptions options;
+        try { options = ReadProvider(); }
+        catch (Exception error)
+        {
+            Tabs.SelectedItem = TranslationPage;
+            ConnectionPanel.IsExpanded = true;
+            Status.Text = "أكمل إعداد اتصال الذكاء الاصطناعي أولاً: " + error.Message;
+            return;
+        }
+
+        string password = ZipPassword.Password;
+        work = new CancellationTokenSource();
+        var token = work.Token;
+        if (RunAiScoutButton != null) RunAiScoutButton.IsEnabled = false;
+        Status.Text = $"جارٍ تحليل هياكل الملفات عبر كشّاف الذكاء الاصطناعي ({options.Provider} / {options.Model})…";
+        try
+        {
+            ScoutPlan plan = await Task.Run(async () =>
+            {
+                using var store = new ProjectStore(path);
+                return await LocalizationScout.AnalyzeAsync(store, options, token);
+            }, token);
+
+            if (plan.Recommendations.Count == 0)
+            {
+                Status.Text = "لا توجد ملفات مختلطة أو غير محسومة تحتاج تحليل كشّاف الذكاء الاصطناعي — ملفاتك صافية بالفعل.";
+                return;
+            }
+
+            var dialog = new ScoutPlanWindow(plan) { Owner = this };
+            if (dialog.ShowDialog() != true)
+            {
+                Status.Text = "تم إلغاء تطبيق خطة كشّاف الذكاء الاصطناعي.";
+                return;
+            }
+
+            var selected = dialog.SelectedClusterIds;
+            if (selected.Count == 0)
+            {
+                Status.Text = "لم يُحدَّد أي صف من توصيات كشّاف الذكاء الاصطناعي.";
+                return;
+            }
+
+            Status.Text = "جارٍ تطبيق قواعد الاستخراج وتحديث الفحص…";
+            ScoutApplyResult applied = await Task.Run(() =>
+            {
+                using var store = new ProjectStore(path);
+                return new ProjectService(store).ApplyScoutPlan(plan, selected, password, token);
+            }, token);
+
+            Status.Text = $"طُبّقت توصيات {applied.AppliedClusters:N0} مجموعة ({applied.IncludedFiles:N0} ملف مفعّل · {applied.ConfiguredRuleFiles:N0} قاعدة حقول · {applied.ExcludedFiles:N0} مستبعد) — النصوص النشطة الآن: {applied.ActiveUnitsAfterScan:N0}.";
+            RefreshScannedFiles();
+            await RefreshRows();
+            UpdateOverview();
+        }
+        catch (OperationCanceledException)
+        {
+            Status.Text = "تم إلغاء كشّاف الذكاء الاصطناعي.";
+        }
+        catch (Exception error)
+        {
+            Status.Text = "تعذّر إكمال كشّاف الذكاء الاصطناعي: " + error.Message;
+        }
+        finally
+        {
+            work?.Dispose();
+            work = null;
+            if (RunAiScoutButton != null) RunAiScoutButton.IsEnabled = true;
         }
     }
 }

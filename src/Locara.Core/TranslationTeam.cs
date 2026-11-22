@@ -146,11 +146,28 @@ public sealed class TranslationTeam(ProjectStore store)
         int nextId = 0;
         var locatorOrder = StringComparer.Create(System.Globalization.CultureInfo.InvariantCulture,
             System.Globalization.CompareOptions.NumericOrdering);
-        var batches = sections.SelectMany(section => section.OrderBy(row => row.Locator, locatorOrder)
-            .Chunk(chunkSize)
-            .Select(rows => new TeamBatch(++nextId, section.Key,
-                rows.Select(row => new TeamRow(row.Id, row.Revision, row.Source, row.Context,
-                    settings.ReviewDrafts ? row.Target : "")).ToArray()))).ToArray();
+        const int maxBatchCharacters = 8000;
+        var batchList = new List<TeamBatch>();
+        foreach (var section in sections)
+        {
+            var currentChunk = new List<TeamRow>(chunkSize);
+            int currentChars = 0;
+            foreach (var row in section.OrderBy(row => row.Locator, locatorOrder))
+            {
+                if (currentChunk.Count > 0 && (currentChunk.Count >= chunkSize || currentChars + row.Source.Length > maxBatchCharacters))
+                {
+                    batchList.Add(new TeamBatch(++nextId, section.Key, currentChunk.ToArray()));
+                    currentChunk.Clear();
+                    currentChars = 0;
+                }
+                currentChunk.Add(new TeamRow(row.Id, row.Revision, row.Source, row.Context,
+                    settings.ReviewDrafts ? row.Target : ""));
+                currentChars += row.Source.Length;
+            }
+            if (currentChunk.Count > 0)
+                batchList.Add(new TeamBatch(++nextId, section.Key, currentChunk.ToArray()));
+        }
+        var batches = batchList.ToArray();
         if (batches.Length == 0)
             throw new InvalidOperationException(settings.ReviewDrafts
                 ? "لا توجد مسودات للمراجعة في النطاق المحدد."
@@ -596,6 +613,24 @@ public sealed class TranslationTeam(ProjectStore store)
                 work = work with { Skipped = skipped };
             }
 
+            // Auto-resolve whitespace-only legacy rows verbatim so they never poison a batch
+            var whitespaceRows = batch.Rows.Where(row => work.Skipped?.Contains(row.Id) != true
+                && string.IsNullOrWhiteSpace(row.Source)
+                && (work.Drafts == null || !work.Drafts.ContainsKey(row.Id)
+                    || work.Reviews == null || !work.Reviews.TryGetValue(row.Id, out var rv) || !rv.Ok)).ToArray();
+            if (whitespaceRows.Length > 0)
+            {
+                var drafts = work.Drafts ?? new Dictionary<string, string>(StringComparer.Ordinal);
+                var reviews = work.Reviews ?? new Dictionary<string, Review>(StringComparer.Ordinal);
+                foreach (var wsRow in whitespaceRows)
+                {
+                    drafts[wsRow.Id] = wsRow.Source;
+                    reviews[wsRow.Id] = new Review(true, "", "");
+                }
+                work = work with { Drafts = drafts, Reviews = reviews };
+                WriteWork(worker, plan.Id, batch.Id, work, syncNotes: false);
+            }
+
             var rows = batch.Rows.Where(row => work.Skipped?.Contains(row.Id) != true
                 && (correction
                     ? work.Reviews!.TryGetValue(row.Id, out var verdict) && !verdict.Ok
@@ -798,6 +833,8 @@ public sealed class TranslationTeam(ProjectStore store)
 
     private static string LocalIssue(TeamPlan plan, TeamRow row, string draft)
     {
+        if (string.IsNullOrWhiteSpace(row.Source))
+            return draft == row.Source ? "" : "المصدر فراغ فقط ويجب الإبقاء عليه كما هو.";
         if (string.IsNullOrWhiteSpace(draft)) return "المسودة فارغة.";
         string warning = Tokens.Validate(row.Source, draft, plan.Engine);
         if (warning.Length > 0) return warning;

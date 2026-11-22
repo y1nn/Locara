@@ -489,11 +489,12 @@ public sealed class ProjectWorkflowTests
         using var store = ProjectStore.Create(ws.PathOf("guard-project"), "GuardTest", game);
         var service = new ProjectService(store);
 
-        // 1. Initial scan auto-excludes runtime_meta.json (Technical) while keeping dialogue.json & mixed.json active
+        // 1. Initial scan auto-excludes runtime_meta.json (Technical) AND mixed.json (Mixed) while keeping dialogue.json active
         var scan = service.Scan();
         Assert.Equal(3, scan.Files);
-        Assert.Equal(7, scan.Units); // 3 from dialogue + 4 from mixed; 0 from auto-excluded runtime_meta.json
+        Assert.Equal(3, scan.Units); // 3 from dialogue; 0 from auto-excluded mixed.json and runtime_meta.json
         Assert.Contains(scan.Diagnostics, d => d.Path == "runtime_meta.json");
+        Assert.Contains(scan.Diagnostics, d => d.Path == "mixed.json");
 
         var files = service.ScannedFiles();
         var dialogue = files.Single(f => f.Path == "dialogue.json");
@@ -502,20 +503,36 @@ public sealed class ProjectWorkflowTests
 
         Assert.Equal(FileQualityVerdict.Translatable, dialogue.Verdict);
         Assert.True(dialogue.Included);
+        Assert.Equal(3, dialogue.IncludedUnits);
         Assert.Equal(3, dialogue.Samples.Count);
 
         Assert.Equal(FileQualityVerdict.Mixed, mixed.Verdict);
-        Assert.True(mixed.Included);
+        Assert.False(mixed.Included);
+        Assert.Equal(0, mixed.IncludedUnits);
 
         Assert.Equal(FileQualityVerdict.Technical, tech.Verdict);
         Assert.False(tech.Included);
         Assert.Equal(4, tech.TotalUnits);
         Assert.Equal(4, tech.Samples.Count);
 
-        // Translation estimate must NOT count units from auto-excluded technical file
-        Assert.Equal(7, new TranslationRunner(store).Estimate().Units);
+        // Translation estimate must NOT count units from auto-excluded technical or mixed files
+        Assert.Equal(3, new TranslationRunner(store).Estimate().Units);
 
-        // 2. Translate dialogue.json, exclude mixed.json, and verify Build leaves excluded files untouched
+        // 2. Enable mixed.json in human-only mode -> only human strings ("Main Menu", "Press Start") become active
+        service.SetFileIncluded("mixed.json", true, humanOnly: true);
+        var mixedAfterHumanOnly = service.ScannedFiles().Single(f => f.Path == "mixed.json");
+        Assert.True(mixedAfterHumanOnly.Included);
+        Assert.True(mixedAfterHumanOnly.HumanOnlyFilter);
+        Assert.Equal(2, mixedAfterHumanOnly.IncludedUnits);
+        Assert.Equal(5, new TranslationRunner(store).Estimate().Units); // 3 dialogue + 2 human mixed
+        var activeMixedLocators = store.Units().Where(u => u.Path == "mixed.json").Select(u => u.Locator).OrderBy(x => x).ToArray();
+        Assert.Equal(["/sub", "/title"], activeMixedLocators);
+
+        // Re-scan must preserve human-only mode for mixed.json
+        service.Scan();
+        Assert.Equal(["/sub", "/title"], store.Units().Where(u => u.Path == "mixed.json").Select(u => u.Locator).OrderBy(x => x).ToArray());
+
+        // 3. Translate dialogue.json, exclude mixed.json, and verify Build leaves excluded files untouched
         var startUnit = store.Units().Single(u => u.Path == "dialogue.json" && u.Locator == "/start");
         startUnit.Target = "ابدأ اللعبة";
         store.Save(startUnit, approve: true);
@@ -530,14 +547,14 @@ public sealed class ProjectWorkflowTests
         Assert.Equal(1, built.Translations);
         Assert.Contains("ابدأ اللعبة", File.ReadAllText(Path.Combine(built.Directory, "resources/dialogue.json")));
 
-        // 3. User manually enables runtime_meta.json -> choice persists across re-scans
+        // 4. User manually enables runtime_meta.json -> choice persists across re-scans
         service.SetFileIncluded("runtime_meta.json", true);
         Assert.Equal(7, store.ReviewCounts()["total"]);
         service.Scan();
         Assert.True(service.ScannedFiles().Single(f => f.Path == "runtime_meta.json").Included);
         Assert.False(service.ScannedFiles().Single(f => f.Path == "mixed.json").Included);
 
-        // 4. Remove "/old" from dialogue.json, re-scan, toggle dialogue.json off then on -> "/old" must NEVER resurrect
+        // 5. Remove "/old" from dialogue.json, re-scan, toggle dialogue.json off then on -> "/old" must NEVER resurrect
         File.WriteAllText(dialoguePath, """{"start":"Start Game","quit":"Quit to Desktop"}""");
         service.Scan();
         Assert.DoesNotContain(store.Units(), u => u.Locator == "/old");
@@ -568,5 +585,114 @@ public sealed class ProjectWorkflowTests
         Assert.False(Engines.IsEngineInternalMetadata("MyGame_Data/StreamingAssets/Localization/en.json"));
         Assert.False(Engines.IsEngineInternalMetadata("data/System.json"));
         Assert.False(Engines.IsEngineInternalMetadata("strings.xml"));
+    }
+
+    [Fact]
+    public void AdaptiveLocaleDetectionHandlesUnderscoreTokensAndAvoidsFalsePositives()
+    {
+        // Standard folder, exact filename, dot suffix, and underscore tokens in localization paths
+        Assert.Equal("eng", ProjectService.ExtractPathLocale("localization/eng/cards.json"));
+        Assert.Equal("ru", ProjectService.ExtractPathLocale("strings/ru.po"));
+        Assert.Equal("fr", ProjectService.ExtractPathLocale("ui.fr.json"));
+        Assert.Equal("ko", ProjectService.ExtractPathLocale("StreamingAssets/strings/strings_preinstalled_ko_studio.po"));
+        Assert.Equal("ru", ProjectService.ExtractPathLocale("StreamingAssets/strings/strings_preinstalled_ru_studio.po"));
+        Assert.Equal("zh", ProjectService.ExtractPathLocale("StreamingAssets/strings/strings_preinstalled_zh_studio.po"));
+        Assert.Equal("zh_cn", ProjectService.ExtractPathLocale("data/ui_zh_cn.json"));
+        Assert.Equal("it", ProjectService.ExtractPathLocale("strings/strings_it.po"));
+        Assert.Equal("french", ProjectService.ExtractPathLocale("data/dialogue_french.json"));
+
+        // Must NOT false-positive on common English/tech identifiers outside dedicated localization endings
+        Assert.Null(ProjectService.ExtractPathLocale("data/building_id.json"));
+        Assert.Null(ProjectService.ExtractPathLocale("worldgen/item_no.yaml"));
+        Assert.Null(ProjectService.ExtractPathLocale("worldgen/shark_fin.yaml"));
+        Assert.Null(ProjectService.ExtractPathLocale("worldgen/resort_spa.yaml"));
+        Assert.Null(ProjectService.ExtractPathLocale("StreamingAssets/strings/strings_template.pot"));
+        Assert.True(ProjectService.IsGettextTemplate("StreamingAssets/strings/strings_template.pot"));
+        Assert.True(ProjectService.IsPrimaryLocaleSource("StreamingAssets/strings/strings_template.pot"));
+    }
+
+    [Fact]
+    public void SingleTokenEnumFilesAreFlaggedMixedWhilePureUiButtonsStayTranslatable()
+    {
+        // Pure single-word UI labels with zero technical tokens remain Translatable
+        var uiButtons = TextQualityClassifier.ClassifyFile("buttons.json",
+            ["Play", "Options", "Credits", "Quit"]);
+        Assert.Equal(FileQualityVerdict.Translatable, uiButtons.Verdict);
+
+        // Single-word enum/data YAML with CamelCase technical tokens and zero sentences is flagged Mixed/Technical
+        var worldgen = TextQualityClassifier.ClassifyFile("worldgen/borders.yaml",
+            ["Katairite", "Unobtanium", "Granite", "IgneousRock"]);
+        Assert.Equal(FileQualityVerdict.Mixed, worldgen.Verdict);
+
+        var codex = TextQualityClassifier.ClassifyFile("codex/PrintingPod.yaml",
+            ["STRINGS.CODEX.HEADQUARTERS.TITLE", "Title", "hqbase", "Vertical", "STRINGS.CODEX.HEADQUARTERS.SUBTITLE", "Subtitle"]);
+        Assert.NotEqual(FileQualityVerdict.Translatable, codex.Verdict);
+    }
+
+    [Fact]
+    public void DedicatedLocalizationPriorityExcludesSidecarDataAndSecondaryLocalesWhileKeepingPrimaryTemplate()
+    {
+        using var ws = new TempWorkspace();
+        string game = Directory.CreateDirectory(ws.PathOf("hybrid-game")).FullName;
+        Directory.CreateDirectory(Path.Combine(game, "StreamingAssets", "strings"));
+        Directory.CreateDirectory(Path.Combine(game, "StreamingAssets", "worldgen"));
+        Directory.CreateDirectory(Path.Combine(game, "StreamingAssets", "codex"));
+        Directory.CreateDirectory(Path.Combine(game, "StreamingAssets", "localization", "en"));
+
+        var potSb = new System.Text.StringBuilder();
+        potSb.AppendLine("msgid \"\"");
+        potSb.AppendLine("msgstr \"\"");
+        potSb.AppendLine();
+        for (int i = 1; i <= 25; i++)
+        {
+            potSb.AppendLine($"msgctxt \"STRINGS.UI.ENTRY_{i}\"");
+            potSb.AppendLine($"msgid \"Colony mission objective number {i} is ready for launch.\"");
+            potSb.AppendLine("msgstr \"\"");
+            potSb.AppendLine();
+        }
+        File.WriteAllText(Path.Combine(game, "StreamingAssets", "strings", "strings_template.pot"), potSb.ToString());
+        File.WriteAllText(Path.Combine(game, "StreamingAssets", "strings", "strings_preinstalled_ko_studio.po"), potSb.ToString());
+        File.WriteAllText(Path.Combine(game, "StreamingAssets", "strings", "strings_preinstalled_ru_studio.po"), potSb.ToString());
+
+        // Sidecar data files outside localization directories
+        File.WriteAllText(Path.Combine(game, "StreamingAssets", "worldgen", "biomes.yaml"),
+            "name: Frozen Core\nborder: Igneous Granite\nambient: Cold Air\n");
+        File.WriteAllText(Path.Combine(game, "StreamingAssets", "codex", "entry.yaml"),
+            "title: STRINGS.CODEX.POD.TITLE\nstyle: Title\nlayout: Vertical\nsub: STRINGS.CODEX.POD.SUB\n");
+
+        // Explicit localization directory JSON file should stay Translatable & included alongside .pot
+        File.WriteAllText(Path.Combine(game, "StreamingAssets", "localization", "en", "credits.json"),
+            """{"lead":"Directed by the Studio Team","music":"Original Soundtrack Composed Live"}""");
+
+        using var store = ProjectStore.Create(ws.PathOf("hybrid-project"), "HybridGame", game);
+        var service = new ProjectService(store);
+        var scan = service.Scan();
+
+        // Only strings_template.pot (25) + localization/en/credits.json (2) = 27 active units
+        Assert.Equal(27, scan.Units);
+
+        var files = service.ScannedFiles();
+        var pot = files.Single(f => f.Path.EndsWith("strings_template.pot", StringComparison.OrdinalIgnoreCase));
+        var ko = files.Single(f => f.Path.EndsWith("strings_preinstalled_ko_studio.po", StringComparison.OrdinalIgnoreCase));
+        var ru = files.Single(f => f.Path.EndsWith("strings_preinstalled_ru_studio.po", StringComparison.OrdinalIgnoreCase));
+        var biomes = files.Single(f => f.Path.EndsWith("biomes.yaml", StringComparison.OrdinalIgnoreCase));
+        var codex = files.Single(f => f.Path.EndsWith("entry.yaml", StringComparison.OrdinalIgnoreCase));
+        var credits = files.Single(f => f.Path.EndsWith("credits.json", StringComparison.OrdinalIgnoreCase));
+
+        Assert.True(pot.Included);
+        Assert.Equal(FileQualityVerdict.Translatable, pot.Verdict);
+
+        Assert.False(ko.Included);
+        Assert.Equal(FileQualityVerdict.SecondaryLanguage, ko.Verdict);
+        Assert.False(ru.Included);
+        Assert.Equal(FileQualityVerdict.SecondaryLanguage, ru.Verdict);
+
+        Assert.False(biomes.Included);
+        Assert.Equal(FileQualityVerdict.AuxiliaryData, biomes.Verdict);
+        Assert.False(codex.Included);
+        Assert.True(codex.Verdict is FileQualityVerdict.AuxiliaryData or FileQualityVerdict.Technical);
+
+        Assert.True(credits.Included);
+        Assert.Equal(FileQualityVerdict.Translatable, credits.Verdict);
     }
 }

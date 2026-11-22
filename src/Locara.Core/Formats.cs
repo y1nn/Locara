@@ -40,7 +40,10 @@ public static class Formats
             _ => format.Extract(bytes)
         };
         var fields = rule?.Fields?.ToHashSet(StringComparer.Ordinal);
-        return slots.Where(slot => (engineExtracts || profile.Include(path, slot)) && (fields == null || fields.Contains(slot.Locator))).ToList();
+        var fieldPatterns = rule?.FieldPatterns is { Length: > 0 } patterns ? patterns : null;
+        return slots.Where(slot => (engineExtracts || profile.Include(path, slot))
+            && (fields == null || fields.Contains(slot.Locator))
+            && (fieldPatterns == null || FieldSemantics.MatchesAnyPattern(slot.Locator, fieldPatterns))).ToList();
     }
 
     internal static byte[] Apply(byte[] bytes, IFormatHandler format,

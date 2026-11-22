@@ -48,13 +48,14 @@ public partial class MainWindow
     private static OverviewData ReadOverview(string path, bool includeSections)
     {
         using var store = new ProjectStore(path);
-        new ProjectService(store).EnsureCatalogSelected();
+        var svc = new ProjectService(store);
+        svc.EnsureCatalogSelected();
         var info = store.Info;
         var version = store.Get("scan_version");
         var engine = store.Get("scanned_engine");
         var package = store.Get("scanned_package");
         bool scanned = info.Source.Length > 0 && info.Source == store.Get("scanned_source");
-        bool errors = scanned && store.Get("scan_errors") != "[]";
+        bool errors = scanned && svc.HasBlockingScanErrors();
         var counts = store.ReviewCounts();
         string output = store.LastOutput;
         var team = new TranslationTeam(store);

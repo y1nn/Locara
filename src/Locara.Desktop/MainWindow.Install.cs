@@ -7,6 +7,8 @@ namespace Locara.Desktop;
 
 public partial class MainWindow
 {
+    private bool updatingGettextTarget;
+
     private void RefreshDirectInstallStatus()
     {
         if (projectPath == null)
@@ -15,6 +17,7 @@ public partial class MainWindow
             DirectInstallStatusDetail.Text = "";
             DirectRestoreButton.Visibility = Visibility.Collapsed;
             AcceptGameUpdateButton.Visibility = Visibility.Collapsed;
+            if (GettextPoTargetBorder != null) GettextPoTargetBorder.Visibility = Visibility.Collapsed;
             return;
         }
         string path = projectPath;
@@ -27,20 +30,27 @@ public partial class MainWindow
                 try { destination = PackageInstaller.ResolveInstallDestination(project); } catch { }
                 var state = PackageInstaller.GetInPlaceStatus(project);
                 string engine = project.Get("scanned_engine");
-                return (Destination: destination, State: state, Engine: engine, Error: (string?)null);
+                var scannedFiles = new ProjectService(project).ScannedFiles();
+                bool hasActivePot = scannedFiles.Any(f => f.Included && f.Format == "po" && ProjectService.IsGettextTemplate(f.Path));
+                var siblingPos = hasActivePot
+                    ? scannedFiles.Where(f => f.Format == "po" && !ProjectService.IsGettextTemplate(f.Path)).Select(f => f.Path).ToList()
+                    : new List<string>();
+                string savedPoTarget = project.Get(ProjectService.GettextPoTargetSetting);
+                return (Destination: destination, State: state, Engine: engine, HasActivePot: hasActivePot, SiblingPos: siblingPos, SavedPoTarget: savedPoTarget, Error: (string?)null);
             }
             catch (Exception error)
             {
-                return (Destination: "", State: (InPlaceInstallState?)null, Engine: "", Error: (string?)error.Message);
+                return (Destination: "", State: (InPlaceInstallState?)null, Engine: "", HasActivePot: false, SiblingPos: new List<string>(), SavedPoTarget: "", Error: (string?)error.Message);
             }
         }).ContinueWith(task =>
         {
             Dispatcher.Invoke(() =>
             {
                 if (projectPath != path) return;
-                var (destination, state, engine, error) = task.Result;
+                var (destination, state, engine, hasActivePot, siblingPos, savedPoTarget, error) = task.Result;
                 bool showUnityTmp = string.IsNullOrWhiteSpace(engine) || engine.Equals("unity", StringComparison.OrdinalIgnoreCase);
                 UnityTmpSettingsBorder.Visibility = showUnityTmp ? Visibility.Visible : Visibility.Collapsed;
+                PopulateGettextPoTargetSelector(hasActivePot, siblingPos, savedPoTarget);
                 if (error != null)
                 {
                     DirectInstallStatusBorder.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFF8EB"));
@@ -96,6 +106,74 @@ public partial class MainWindow
                 }
             });
         }, TaskScheduler.Default);
+    }
+
+    private void PopulateGettextPoTargetSelector(bool hasActivePot, List<string> siblingPos, string savedTarget)
+    {
+        if (GettextPoTargetBorder == null || GettextPoTargetSelector == null) return;
+        if (!hasActivePot)
+        {
+            GettextPoTargetBorder.Visibility = Visibility.Collapsed;
+            return;
+        }
+        GettextPoTargetBorder.Visibility = Visibility.Visible;
+        updatingGettextTarget = true;
+        try
+        {
+            GettextPoTargetSelector.Items.Clear();
+            foreach (string poPath in siblingPos)
+            {
+                string fileName = System.IO.Path.GetFileName(poPath);
+                GettextPoTargetSelector.Items.Add(new System.Windows.Controls.ComboBoxItem
+                {
+                    Tag = poPath,
+                    Content = $"استبدال ملف لغة مثبّت داخل اللعبة (موصى به): {fileName}"
+                });
+            }
+            GettextPoTargetSelector.Items.Add(new System.Windows.Controls.ComboBoxItem
+            {
+                Tag = "export-ar",
+                Content = "تعديل القالب (.pot) + تصدير ملف عربي مستقل (*_ar.po)"
+            });
+            GettextPoTargetSelector.Items.Add(new System.Windows.Controls.ComboBoxItem
+            {
+                Tag = "pot-only",
+                Content = "تعديل ملف القالب (.pot) فقط"
+            });
+
+            string effective = string.IsNullOrWhiteSpace(savedTarget) ? "export-ar" : savedTarget;
+            System.Windows.Controls.ComboBoxItem? match = null;
+            foreach (var obj in GettextPoTargetSelector.Items)
+            {
+                if (obj is System.Windows.Controls.ComboBoxItem item
+                    && string.Equals(item.Tag as string, effective, StringComparison.OrdinalIgnoreCase))
+                {
+                    match = item;
+                    break;
+                }
+            }
+            GettextPoTargetSelector.SelectedItem = match ?? GettextPoTargetSelector.Items[0];
+        }
+        finally { updatingGettextTarget = false; }
+    }
+
+    private void SelectGettextPoTarget(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (updatingGettextTarget || projectPath == null) return;
+        if (GettextPoTargetSelector.SelectedItem is not System.Windows.Controls.ComboBoxItem item) return;
+        string target = (item.Tag as string) ?? "";
+        try
+        {
+            using var project = new ProjectStore(projectPath);
+            project.Set(ProjectService.GettextPoTargetSetting, target);
+            Status.Text = target is "export-ar" or "pot-only"
+                ? "تم حفظ خيار تصدير Gettext للمشروع."
+                : $"سيُطبّق التعريب على «{System.IO.Path.GetFileName(target)}» عند التجربة والتثبيت (مع نسخة احتياطية كاملة).";
+        }
+        catch (Exception error)
+        {
+            Status.Text = error.Message;
+        }
     }
 
     private async Task<bool> EnsureOriginalsBeforeActionAsync(string actionLabel)

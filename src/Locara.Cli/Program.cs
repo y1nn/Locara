@@ -20,7 +20,10 @@ if(args.Length==0||args[0] is "help" or "--help")
         plan <project-folder> [--final]
         scan <project-folder>
         files <project-folder>
-        include <project-folder> <file-path>
+        clusters <project-folder>
+        advice <project-folder>
+        scout <project-folder> <gemini|anthropic|deepseek|openai-compatible|azure> <model> [base-url] [--apply]
+        include <project-folder> <file-path> [--human-only]
         exclude <project-folder> <file-path>
         list <project-folder> [search] [offset]
         edit <project-folder> <unit-id> <translation>
@@ -88,11 +91,39 @@ try
             var fileOpts = new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter<FileQualityVerdict>() } };
             Console.WriteLine(JsonSerializer.Serialize(service.ScannedFiles(), fileOpts));
             break;
+        case "clusters":
+            var clusterOpts = new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter<FileQualityVerdict>(), new JsonStringEnumConverter<FieldSemanticHint>() } };
+            Console.WriteLine(JsonSerializer.Serialize(service.BuildSchemaClusters(), clusterOpts));
+            break;
+        case "advice":
+            Console.WriteLine(JsonSerializer.Serialize(service.AnalyzeDeployment(password, stop.Token), new JsonSerializerOptions { WriteIndented = true }));
+            break;
+        case "scout":
+        {
+            string[] positional = args.Skip(2).Where(a => !a.StartsWith("--", StringComparison.Ordinal)).ToArray();
+            if (positional.Length < 2) throw new ArgumentException("scout <project-folder> <provider> <model> [base-url] [--apply]");
+            bool applyScout = args.Contains("--apply");
+            string apiKey = Environment.GetEnvironmentVariable("LOCARA_API_KEY") ?? "";
+            string? baseUrl = positional.ElementAtOrDefault(2);
+            var scoutOpts = new ProviderOptions(positional[0], positional[1], apiKey, baseUrl, Environment.GetEnvironmentVariable("LOCARA_REGION"));
+            var scoutPlan = await LocalizationScout.AnalyzeAsync(project, scoutOpts, stop.Token);
+            if (applyScout && scoutPlan.Recommendations.Count > 0)
+            {
+                var applied = service.ApplyScoutPlan(scoutPlan, null, password, stop.Token);
+                Console.WriteLine(JsonSerializer.Serialize(new { plan = scoutPlan, applied }, new JsonSerializerOptions { WriteIndented = true }));
+            }
+            else
+            {
+                Console.WriteLine(JsonSerializer.Serialize(scoutPlan, new JsonSerializerOptions { WriteIndented = true }));
+            }
+            break;
+        }
         case "include":
         case "exclude":
-            if (args.Length != 3) throw new ArgumentException($"{args[0]} <project-folder> <file-path>");
-            service.SetFileIncluded(args[2], args[0] == "include");
-            Console.WriteLine($"{(args[0] == "include" ? "Included" : "Excluded")} {args[2]}");
+            if (args.Length < 3 || args.Length > 4) throw new ArgumentException($"{args[0]} <project-folder> <file-path> [--human-only]");
+            bool humanOnly = args[0] == "include" && args.Contains("--human-only");
+            service.SetFileIncluded(args[2], args[0] == "include", humanOnly);
+            Console.WriteLine($"{(args[0] == "include" ? (humanOnly ? "Included (human-only)" : "Included") : "Excluded")} {args[2]}");
             break;
         case "list":Console.WriteLine(JsonSerializer.Serialize(project.Units(args.ElementAtOrDefault(2)??"",int.Parse(args.ElementAtOrDefault(3)??"0")),new JsonSerializerOptions{WriteIndented=true}));break;
         case "edit":case "approve":
