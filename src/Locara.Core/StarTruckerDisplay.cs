@@ -113,11 +113,16 @@ public static partial class StarTruckerDisplay
         var pendingLeadingTags = new List<WrapAtom>();
         int noBreakDepth = 0;
 
+        static bool IsNonBreakableTag(string tagName) =>
+            tagName.Equals("nobr", StringComparison.OrdinalIgnoreCase)
+            || tagName.Equals("link", StringComparison.OrdinalIgnoreCase)
+            || tagName.Equals("a", StringComparison.OrdinalIgnoreCase);
+
         foreach (var atom in atoms)
         {
-            if (atom.Kind == WrapAtomKind.OpenTag && atom.TagName.Equals("nobr", StringComparison.OrdinalIgnoreCase))
+            if (atom.Kind == WrapAtomKind.OpenTag && IsNonBreakableTag(atom.TagName))
                 noBreakDepth++;
-            else if (atom.Kind == WrapAtomKind.CloseTag && atom.TagName.Equals("nobr", StringComparison.OrdinalIgnoreCase) && noBreakDepth > 0)
+            else if (atom.Kind == WrapAtomKind.CloseTag && IsNonBreakableTag(atom.TagName) && noBreakDepth > 0)
                 noBreakDepth--;
 
             if (atom.Kind == WrapAtomKind.Space && noBreakDepth == 0)
@@ -449,11 +454,33 @@ public static partial class StarTruckerDisplay
 
     private static string ShapeLine(string text)
     {
+        if (!HasArabic(text)) return text;
+        string? shaped = TryShapeLineFull(text);
+        if (shaped != null) return shaped;
+        // Fallback for exotic cross-boundary tag layouts: shape each tag-free segment individually
+        // so all rich-text tags preserve 100% valid nesting while Arabic glyphs still render shaped.
+        string fallback = ShapeTextSegmentsOnly(text);
+        if (!Tokens.ValidTagNesting(text, fallback))
+            throw new InvalidDataException("تغيّرت رموز اللعبة أثناء تجهيز العرض العربي.");
+        return fallback;
+    }
+
+    private static string? TryShapeLineFull(string text)
+    {
         var (masked, tokens) = MaskPureLtr(text);
-        var shaped = new char[masked.Length];
+        // Strip unmatched outer opening tags at the start and unmatched closing tags at the end
+        // (common when multi-line tags like <size=11>...\n...</size> span line breaks).
+        StripUnmatchedOuterTags(masked, tokens, out string prefix, out string core, out string suffix);
+        if (core.Length == 0 || !HasArabic(core))
+        {
+            string restored = Tokens.Restore(prefix + core + suffix, tokens);
+            return Tokens.ValidTagNesting(text, restored) ? restored : null;
+        }
+
+        var shaped = new char[core.Length];
         int error = 0;
         const uint shapeLetters = 8;
-        int length = ShapeArabic(masked, masked.Length, shaped, shaped.Length, shapeLetters, ref error);
+        int length = ShapeArabic(core, core.Length, shaped, shaped.Length, shapeLetters, ref error);
         CheckIcu(error);
 
         nint layout = OpenBidi();
@@ -467,16 +494,15 @@ public static partial class StarTruckerDisplay
             var display = new char[length];
             int written = WriteDisplay(layout, display, length, keepCombiningMarksAndMirror, ref error);
             CheckIcu(error);
-            string reordered = FixReversedTagPairs(masked, new(display, 0, written), tokens);
+            string reorderedCore = FixReversedTagPairs(core, new(display, 0, written), tokens);
+            string reordered = prefix + reorderedCore + suffix;
             foreach (string key in tokens.Keys)
             {
                 if (!reordered.Contains(key, StringComparison.Ordinal))
-                    throw new InvalidDataException("تغيّرت رموز اللعبة أثناء تجهيز العرض العربي.");
+                    return null;
             }
             string result = Tokens.Restore(reordered, tokens);
-            if (!Tokens.ValidTagNesting(text, result))
-                throw new InvalidDataException("تغيّرت رموز اللعبة أثناء تجهيز العرض العربي.");
-            return result;
+            return Tokens.ValidTagNesting(text, result) ? result : null;
         }
         finally
         {
@@ -485,13 +511,96 @@ public static partial class StarTruckerDisplay
         }
     }
 
+    private static void StripUnmatchedOuterTags(string masked, IReadOnlyDictionary<string, string> tokens,
+        out string prefix, out string core, out string suffix)
+    {
+        prefix = "";
+        suffix = "";
+        core = masked;
+        if (tokens.Count == 0) return;
+
+        var openStack = new Stack<(string Key, string TagName)>();
+        var unmatchedClose = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (key, value) in tokens)
+        {
+            var match = XmlTagName().Match(value);
+            if (!match.Success) continue;
+            bool isClose = value.StartsWith("</", StringComparison.Ordinal);
+            bool isSelfClose = value.EndsWith("/>", StringComparison.Ordinal);
+            string name = match.Groups[1].Value;
+            if (isSelfClose || (!isClose && IsInlineVoidTag(name))) continue;
+            if (!isClose)
+                openStack.Push((key, name));
+            else if (openStack.Count > 0 && openStack.Peek().TagName.Equals(name, StringComparison.OrdinalIgnoreCase))
+                openStack.Pop();
+            else
+                unmatchedClose.Add(key);
+        }
+        var unmatchedOpen = new HashSet<string>(openStack.Select(o => o.Key), StringComparer.Ordinal);
+
+        bool progressed = true;
+        while (progressed)
+        {
+            progressed = false;
+            foreach (string key in unmatchedOpen)
+            {
+                if (core.StartsWith(key, StringComparison.Ordinal))
+                {
+                    prefix += key;
+                    core = core[key.Length..];
+                    progressed = true;
+                    break;
+                }
+            }
+            foreach (string key in unmatchedClose)
+            {
+                if (core.EndsWith(key, StringComparison.Ordinal))
+                {
+                    suffix = key + suffix;
+                    core = core[..^key.Length];
+                    progressed = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    private static string ShapeTextSegmentsOnly(string text)
+    {
+        var matches = XmlTagToken().Matches(text);
+        if (matches.Count == 0) return text;
+        var sb = new System.Text.StringBuilder(text.Length);
+        int cursor = 0;
+        foreach (Match m in matches)
+        {
+            if (m.Index > cursor)
+            {
+                string seg = text[cursor..m.Index];
+                sb.Append(HasArabic(seg) ? (TryShapeLineFull(seg) ?? seg) : seg);
+            }
+            sb.Append(m.Value);
+            cursor = m.Index + m.Length;
+        }
+        if (cursor < text.Length)
+        {
+            string tail = text[cursor..];
+            sb.Append(HasArabic(tail) ? (TryShapeLineFull(tail) ?? tail) : tail);
+        }
+        return sb.ToString();
+    }
+
+    [GeneratedRegex(@"</?[A-Za-z][A-Za-z0-9_-]*(?:\s*=[^<>]*|\s+[^<>]*)?/?>")]
+    private static partial Regex XmlTagToken();
+
     private static string FixReversedTagPairs(string masked, string reordered, IReadOnlyDictionary<string, string> tokens)
     {
         if (tokens.Count == 0) return reordered;
         var openStack = new Stack<(string Key, string TagName)>();
         var pairs = new List<(string OpenKey, string CloseKey)>();
+        var unmatchedClose = new List<string>();
         foreach (var (key, value) in tokens)
         {
+            if (!masked.Contains(key, StringComparison.Ordinal)) continue;
             var match = XmlTagName().Match(value);
             if (!match.Success) continue;
             bool isClose = value.StartsWith("</", StringComparison.Ordinal);
@@ -507,6 +616,10 @@ public static partial class StarTruckerDisplay
                 var open = openStack.Pop();
                 pairs.Add((open.Key, key));
             }
+            else
+            {
+                unmatchedClose.Add(key);
+            }
         }
         foreach (var (openKey, closeKey) in pairs)
         {
@@ -520,11 +633,61 @@ public static partial class StarTruckerDisplay
                     .Replace(tempMarker, closeKey, StringComparison.Ordinal);
             }
         }
+        // Fix adjacent nested opening or closing tags that ICU kept in LTR order (e.g. <color><b>...</b></color> -> <b><color>...</color></b>)
+        if (pairs.Count >= 2)
+        {
+            for (int pass = 0; pass < pairs.Count; pass++)
+            {
+                bool swapped = false;
+                for (int i = 0; i < pairs.Count; i++)
+                {
+                    for (int j = i + 1; j < pairs.Count; j++)
+                    {
+                        var (o1, c1) = pairs[i];
+                        var (o2, c2) = pairs[j];
+                        int op1 = reordered.IndexOf(o1, StringComparison.Ordinal);
+                        int cp1 = reordered.IndexOf(c1, StringComparison.Ordinal);
+                        int op2 = reordered.IndexOf(o2, StringComparison.Ordinal);
+                        int cp2 = reordered.IndexOf(c2, StringComparison.Ordinal);
+                        if (op1 < 0 || cp1 < 0 || op2 < 0 || cp2 < 0) continue;
+
+                        // Adjacent openings with crossed closes: o1 directly before o2, but c1 < c2 -> swap o1 & o2
+                        if (op1 + o1.Length == op2 && cp1 < cp2)
+                        {
+                            reordered = reordered[..op1] + o2 + o1 + reordered[(op2 + o2.Length)..];
+                            swapped = true;
+                        }
+                        else if (op2 + o2.Length == op1 && cp2 < cp1)
+                        {
+                            reordered = reordered[..op2] + o1 + o2 + reordered[(op1 + o1.Length)..];
+                            swapped = true;
+                        }
+                        // Adjacent closes with crossed opens: c1 directly before c2, but o1 < o2 -> swap c1 & c2
+                        else if (cp1 + c1.Length == cp2 && op1 < op2)
+                        {
+                            reordered = reordered[..cp1] + c2 + c1 + reordered[(cp2 + c2.Length)..];
+                            swapped = true;
+                        }
+                        else if (cp2 + c2.Length == cp1 && op2 < op1)
+                        {
+                            reordered = reordered[..cp2] + c1 + c2 + reordered[(cp1 + c1.Length)..];
+                            swapped = true;
+                        }
+                    }
+                }
+                if (!swapped) break;
+            }
+        }
         while (openStack.Count > 0)
         {
             var (openKey, _) = openStack.Pop();
             if (masked.StartsWith(openKey, StringComparison.Ordinal) && reordered.EndsWith(openKey, StringComparison.Ordinal))
                 reordered = openKey + reordered[..^openKey.Length];
+        }
+        foreach (string closeKey in unmatchedClose)
+        {
+            if (masked.EndsWith(closeKey, StringComparison.Ordinal) && reordered.StartsWith(closeKey, StringComparison.Ordinal))
+                reordered = reordered[closeKey.Length..] + closeKey;
         }
         return reordered;
     }

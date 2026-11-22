@@ -278,7 +278,7 @@ public static class ArabicFontCatalog
         return hasUpperA && hasLowerZ && hasDigit0 && arabicSeen.Count >= 28;
     }
 
-    public static (ArabicFontChoice Choice, byte[] Bytes) ResolveForUnreal(ArabicFontChoice? preferred)
+    public static (ArabicFontChoice Choice, byte[] Bytes) ResolveBilingual(ArabicFontChoice? preferred)
     {
         if (preferred != null)
         {
@@ -295,6 +295,9 @@ public static class ArabicFontCatalog
         var bilingual = BuiltInFonts.First(f => f.Id == "builtin:ibm-plex-bold");
         return (bilingual, LoadBytes(bilingual));
     }
+
+    public static (ArabicFontChoice Choice, byte[] Bytes) ResolveForUnreal(ArabicFontChoice? preferred) =>
+        ResolveBilingual(preferred);
 
     public static void WriteLicense(string directory, ArabicFontChoice? choice)
     {

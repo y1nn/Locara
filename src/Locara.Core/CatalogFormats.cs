@@ -315,7 +315,7 @@ public sealed class PoFormat : IFormatHandler
         List<TextSlot> slots = [];
         foreach (var block in blocks)
         {
-            if (!block.IsMessage || !block.HasMsgId || block.MsgId.Length == 0) continue;
+            if (!block.IsMessage || !block.HasMsgId || string.IsNullOrWhiteSpace(block.MsgId)) continue;
             string key = Key(block.MsgCtxt, block.MsgId);
             if (!block.HasPlural)
                 slots.Add(new(key, block.MsgId, block.MsgCtxt, import ? block.MsgStr : null));
@@ -327,17 +327,20 @@ public sealed class PoFormat : IFormatHandler
         return slots;
     }
 
-    public byte[] Apply(byte[] bytes, IReadOnlyDictionary<string, string> translations)
+    public byte[] Apply(byte[] bytes, IReadOnlyDictionary<string, string> translations) =>
+        Apply(bytes, translations, preserveLanguage: false);
+
+    internal byte[] Apply(byte[] bytes, IReadOnlyDictionary<string, string> translations, bool preserveLanguage)
     {
         var blocks = Parse(bytes);
         int headerIndex = blocks.FindIndex(block => block.IsHeader);
         PoBlock header = headerIndex >= 0 ? blocks[headerIndex] : CreateEmptyHeader();
-        bool keepTargets = Formats.IsArabicTarget(HeaderValue(header, "Language"));
+        bool keepTargets = preserveLanguage || Formats.IsArabicTarget(HeaderValue(header, "Language"));
         bool hasPlural = false;
         bool matched = false;
         foreach (var block in blocks)
         {
-            if (!block.IsMessage || !block.HasMsgId || block.MsgId.Length == 0) continue;
+            if (!block.IsMessage || !block.HasMsgId || string.IsNullOrWhiteSpace(block.MsgId)) continue;
             string key = Key(block.MsgCtxt, block.MsgId);
             if (block.HasPlural)
             {
@@ -365,7 +368,7 @@ public sealed class PoFormat : IFormatHandler
         }
         if (!matched) return bytes;
 
-        header.RewrittenText = RewriteHeader(header, hasPlural);
+        header.RewrittenText = RewriteHeader(header, hasPlural, preserveLanguage);
         if (headerIndex < 0) blocks.Insert(0, header);
 
         var serialized = blocks.Select(block => block.RewrittenText ?? string.Join('\n', block.RawLines));
@@ -409,13 +412,16 @@ public sealed class PoFormat : IFormatHandler
         return true;
     }
 
-    private static string RewriteHeader(PoBlock header, bool hasPlural)
+    private static string RewriteHeader(PoBlock header, bool hasPlural, bool preserveLanguage = false)
     {
         string oldLanguage = HeaderValue(header, "Language");
         var values = header.MsgStr.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => line.TrimEnd('\r')).ToList();
-        Set("Language", oldLanguage.Length > 0 && Formats.IsArabicTarget(oldLanguage) ? oldLanguage : "ar");
+        string targetLang = preserveLanguage && oldLanguage.Length > 0
+            ? oldLanguage
+            : (oldLanguage.Length > 0 && Formats.IsArabicTarget(oldLanguage) ? oldLanguage : "ar");
+        Set("Language", targetLang);
         Set("Content-Type", "text/plain; charset=UTF-8");
-        if (hasPlural || HeaderValue(header, "Plural-Forms").Length > 0) Set("Plural-Forms", ArabicPluralRule);
+        if (!preserveLanguage && (hasPlural || HeaderValue(header, "Plural-Forms").Length > 0)) Set("Plural-Forms", ArabicPluralRule);
         return FormatMessage(header, clearFuzzy: true, ["msgstr \"\"", .. values.Select(line => Quote(line + "\n"))]);
 
         void Set(string name, string value)

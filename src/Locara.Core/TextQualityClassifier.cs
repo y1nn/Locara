@@ -13,6 +13,7 @@ public enum FileQualityVerdict
 {
     Translatable,
     Mixed,
+    AuxiliaryData,
     SecondaryLanguage,
     Technical
 }
@@ -30,7 +31,9 @@ public sealed record FileQualitySummary(
     FileQualityVerdict Verdict,
     string Reason,
     IReadOnlyList<string> Samples,
-    bool Included);
+    bool Included,
+    int IncludedUnits = 0,
+    bool HumanOnlyFilter = false);
 
 public sealed record FileClassification(
     FileQualityVerdict Verdict,
@@ -156,23 +159,56 @@ public static partial class TextQualityClassifier
         return StringQuality.Neutral;
     }
 
-    public static FileClassification ClassifyFile(string path, IReadOnlyList<string> sources)
+    private static bool IsOpenDataFormat(string? format) =>
+        string.IsNullOrEmpty(format)
+        || format is "json" or "yaml" or "xml/xliff" or "ini" or "csv" or "tsv" or "xlsx" or "unity-assets";
+
+    public static StringQuality ClassifyEntry(string? locator, string? text, string? format = null)
     {
-        var samples = BuildSamples(sources, maxSamples: 5);
-        if (sources.Count == 0)
+        var baseQuality = ClassifyString(text);
+        if (baseQuality != StringQuality.Human || !IsOpenDataFormat(format) || string.IsNullOrWhiteSpace(locator))
+            return baseQuality;
+
+        if (FieldSemantics.ClassifyFieldKey(locator) == FieldSemanticHint.LikelyTechnical)
+        {
+            string trimmed = (text ?? "").Trim();
+            if (NonLatinLetterPattern().IsMatch(trimmed))
+                return StringQuality.Human;
+            string[] words = trimmed.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            bool looksLikeSentence = words.Length >= 3
+                || (words.Length >= 2 && trimmed.IndexOfAny(['.', '!', '?', ',', ':', ';']) >= 0);
+            if (!looksLikeSentence)
+                return StringQuality.Technical;
+        }
+        return baseQuality;
+    }
+
+    public static FileClassification ClassifyFile(string path, IReadOnlyList<string> sources) =>
+        ClassifyFile(path, sources.Select(s => ("", s)).ToArray(), format: null);
+
+    public static FileClassification ClassifyFile(string path, IReadOnlyList<(string Locator, string Source)> entries, string? format = null)
+    {
+        var samples = BuildSamples(entries.Select(e => e.Source).ToArray(), maxSamples: 5);
+        if (entries.Count == 0)
         {
             return new(FileQualityVerdict.Technical, 0, 0, 1.0,
                 "لا يحتوي هذا الملف على نصوص قابلة للترجمة.", samples);
         }
 
         int human = 0;
+        int multiWordOrNaturalHuman = 0;
         int technical = 0;
         int neutral = 0;
-        foreach (string src in sources)
+        foreach (var (locator, src) in entries)
         {
-            switch (ClassifyString(src))
+            switch (ClassifyEntry(locator, src, format))
             {
-                case StringQuality.Human: human++; break;
+                case StringQuality.Human:
+                    human++;
+                    string trimmed = (src ?? "").Trim();
+                    if (NonLatinLetterPattern().IsMatch(trimmed) || trimmed.Any(char.IsWhiteSpace))
+                        multiWordOrNaturalHuman++;
+                    break;
                 case StringQuality.Technical: technical++; break;
                 default: neutral++; break;
             }
@@ -181,27 +217,28 @@ public static partial class TextQualityClassifier
         int classified = human + technical;
         double techRatio = classified > 0
             ? (double)technical / classified
-            : (neutral == sources.Count ? 1.0 : 0.0);
+            : (neutral == entries.Count ? 1.0 : 0.0);
 
         FileQualityVerdict verdict;
         string reason;
+        bool singleTokenOnly = multiWordOrNaturalHuman == 0 && entries.Count >= 4 && technical > 0;
 
         if (classified == 0)
         {
             verdict = FileQualityVerdict.Technical;
             reason = "يحتوي قيماً رقمية أو رموزاً فقط دون نصوص بشرية.";
         }
-        else if ((human == 0 && technical > 0) || (sources.Count >= 3 && techRatio >= 0.80))
+        else if ((human == 0 && technical > 0) || (entries.Count >= 3 && techRatio >= 0.80) || (singleTokenOnly && techRatio >= 0.50))
         {
             verdict = FileQualityVerdict.Technical;
             int pct = (int)Math.Round(techRatio * 100);
-            reason = $"ملف تقني/برمجي على الأرجح ({pct}% معرّفات أو مسارات أو أسماء مكتبات) — لا يُنصح بترجمته.";
+            reason = $"ملف تقني/برمجي على الأرجح ({pct}% معرّفات أو مسارات أو حقول إعدادات) — لا يُنصح بترجمته.";
         }
-        else if (techRatio >= 0.35)
+        else if (techRatio >= 0.35 || (singleTokenOnly && techRatio >= 0.20))
         {
             verdict = FileQualityVerdict.Mixed;
             int pct = (int)Math.Round(techRatio * 100);
-            reason = $"محتوى مختلط ({pct}% قيم تقنية و {100 - pct}% نصوص بشرية) — راجع العينة أو استخدم «إعداد الاستخراج».";
+            reason = $"محتوى مختلط ({pct}% قيم/حقول تقنية و {100 - pct}% نصوص بشرية) — استُبعد افتراضياً لحماية اللعبة وتوفير رصيدك؛ راجع العينة أو فعّل النصوص البشرية فقط.";
         }
         else
         {

@@ -11,10 +11,10 @@
 | `src/Locara.Core` | `net10.0` | Engine detection, container codecs, binary & text format handlers, Arabic shaping/wrap/font patching, Layer 1 quality classifier, SQLite project store, AI translation team & usage ledger, verified installer & Steam trial manager |
 | `src/Locara.Desktop` | `net10.0-windows` | Arabic RTL WPF workbench (`MainWindow` split across feature partials: Overview, Games, Files, Translation, Team, Usage, Fonts, Install) + Windows Credential Manager integration |
 | `src/Locara.Cli` | `net10.0` | Scriptable headless CLI exposing project scan, file selection, translation, build, XUnity export, install, and restore |
-| `checks/Locara.Checks` | `net10.0` | Automated xUnit test suite (`52` tests covering codecs, formats, Arabic shaping/wrap, SQLite migrations, AI team concurrency/retry, and install/restore safety) |
+| `checks/Locara.Checks` | `net10.0` | Automated xUnit test suite (`64` tests covering codecs, formats, Arabic shaping/wrap, SQLite migrations, smart field/schema discovery & AI scout, AI team concurrency/retry, and install/restore safety) |
 
 Build invariants enforced in `Directory.Build.props` and `global.json`:
-- .NET SDK pinned to `10.0.404` (`rollForward: latestFeature`).
+- .NET SDK pinned to `10.0.404` (`rollForward: latestPatch`).
 - `TreatWarningsAsErrors=true`, `Nullable=enable`, `RestorePackagesWithLockFile=true`.
 
 ---
@@ -71,18 +71,25 @@ User-level settings live in `%LOCALAPPDATA%\Locara` (with automatic read fallbac
   - **Bilingual Font Injection:** Automatically injects a bilingual Arabic+Latin font (`ArabicFontCatalog.ResolveForUnreal`, falling back to `IBM Plex Sans Arabic Bold` if the chosen font lacks Latin `A–Z`) into game `.ufont`/`.ttf` assets, auto-detecting UE4 raw TTF vs UE5 8-byte envelope wrapping (`int32 len + TTF + 4 zero bytes`) and skipping CJK fonts.
 
 ### Godot Binary `.translation` Pipeline (`GodotTranslationFormat.cs`)
-- Pure-C# Godot 3 & 4 `RSRC` binary resource parser/writer supporting:
+- Pure-C# Godot 3 & 4 `RSRC` and compressed `RSCC` (Zlib/Deflate & Gzip) binary resource parser/writer supporting:
   - `OptimizedTranslation` (Godot 4) and `PHashTranslation` (Godot 3): Decompresses SMAZ payloads using Godot's official 254-entry reverse codebook; writes translated Arabic strings as uncompressed UTF-8 (`comp_size == uncomp_size`) while preserving `hash_table`, `bucket.size`, `bucket.func`, and `elem.key` bit-for-bit.
-  - Uncompressed `Translation` resources (`PackedStringArray` and `Dictionary` message maps).
+  - Plain `Translation` resources (`PackedStringArray` and `Dictionary` message maps).
 
 ---
 
-## 4. Layer 1 Quality & Language Guard (`TextQualityClassifier.cs`, `ProjectService.cs`)
+## 4. Universal Smart Discovery, Quality Guard & Deployment Advisor (`FieldSemantics.cs`, `TextQualityClassifier.cs`, `SchemaClusterer.cs`, `LocalizationScout.cs`, `DeploymentAdvisor.cs`, `ProjectService.cs`)
 
-Before translation, every discovered resource is evaluated:
-1. **Engine Metadata Filter (`Engines.IsEngineInternalMetadata`)**: Drops runtime configs, IL2CPP backup directories (`*_BackUpThisFolder_ButDontShipItWithYourGame`), crash handlers, and Locara's own generated `*_Locara_P.pak`.
-2. **Multi-Language Auto-Exclusion**: Detects English vs non-English locales across both Unity Addressables bundles and localization folder/file paths (`localization/eng/` vs `deu/`, `fra/`, `jpn/`, `.fr.translation`, etc.), excluding secondary languages (`active = 2`) whenever English exists.
-3. **Human vs Technical Classifier (`TextQualityClassifier`)**: Distinguishes natural prose (including standard Arabic, shaped Arabic Presentation Forms `U+FB50–U+FEFF`, Latin, CJK, Cyrillic, etc.) from GUIDs, paths, namespaces, camelCase/snake_case identifiers, and hashes.
+Before translation, every discovered resource passes through a 3-layer adaptive pipeline:
+1. **Layer 1 — Local Semantic & Language Guard (Zero Cost):**
+   - **Engine Metadata Filter (`Engines.IsEngineInternalMetadata`)**: Drops runtime configs, IL2CPP backup directories (`*_BackUpThisFolder_ButDontShipItWithYourGame`), crash handlers, and Locara's own generated `*_Locara_P.pak`.
+   - **Dedicated Localization Priority**: When primary dedicated localization files (`.po`/`.pot`, `.xliff`, `.locres`, `unreal-pak`, `unity-i2`, `unity-bundle`, `godot-translation`, `renpy-template`, `xunity-autotranslator`) provide ≥ 20 human units, sidecar open data files outside explicit localization directories are classified as `AuxiliaryData` and auto-excluded by default.
+   - **Multi-Language Auto-Exclusion (`ExtractPathLocale`, `IsGettextTemplate`)**: Detects English/template sources (including `.pot`) and auto-excludes secondary languages across folder names, exact filenames, dot suffixes, and delimited tokens (`_ko_`, `_ru_`, `_zh_cn`, etc.) without false positives on technical identifiers (`building_id.json`, `shark_fin.yaml`).
+   - **Key + Value Semantic Classifier (`FieldSemantics` + `TextQualityClassifier`)**: Combines value heuristics with field-name semantics (`description`/`dialogue`/`title` vs `layout`/`style`/`prefab`/`element`/`id`) on open data formats, auto-excluding `Technical` and `Mixed` files by default, and supporting per-file `humanOnly` mode and normalized `ExtractionRule.FieldPatterns`.
+   - **Schema Clustering (`SchemaClusterer`)**: Groups structurally identical files into reusable `FileSchemaCluster` templates.
+2. **Layer 2 — Optional AI Localization Scout (`LocalizationScout`, `ScoutPlanWindow`)**:
+   - Sends a compact, token-budgeted schema summary (field names + 3 short samples per field, never full text) to the user's configured AI provider, enforces strict anti-hallucination validation on returned `clusterId` and `fieldPatterns`, records usage in `usage_ledger`, and applies user-approved `ExtractionRule.FieldPatterns` across entire clusters.
+3. **Layer 3 — Deployment Intelligence (`DeploymentAdvisor`)**:
+   - Analyzes engine, active formats, and sibling assets to surface actionable guidance before build/install (e.g., Gettext `.pot` vs sibling `.po` delivery, Unity zero-text → `XUnity.AutoTranslator` recommendation, UE5 IoStore vs `_P.pak`).
 
 ---
 
@@ -94,7 +101,7 @@ Before translation, every discovered resource is evaluated:
   - Up to **16 parallel workers** execute `translate → review → (optional revision up to 2 rounds) → apply`.
   - Supports **per-role** (Supervisor / Translator / Reviewer) and **per-worker** (`#1..#16`) API profile & model routing, applied dynamically even when resuming a saved run.
 - **Fault Tolerance (`TranslationRunner.CanRetry`)**:
-  - Automatically retries transient transport drops (`HttpRequestException` without HTTP status, `IOException`, `TaskCanceledException`, `408`, `429`, `5xx`) with exponential backoff (`2s → 4s → 8s → 16s`), while failing fast on auth/client errors (`400`/`401`/`403`) and TLS certificate pin mismatches (`SecureConnectionError`).
+  - Automatically retries transient transport drops (`HttpRequestException` without HTTP status, `IOException`, `TaskCanceledException`, `408`, `429`, `5xx`) — up to 4 retries with exponential backoff (`2s → 4s → 8s → 16s`) for team workers (and up to 2 retries with linear delay `1s → 2s` for malformed responses, Supervisor planning, and single-runner batches) — while failing fast on auth/client errors (`400`/`401`/`403`) and TLS certificate pin mismatches (`SecureConnectionError`).
   - Validates JSON structure & exact ID coverage per batch before writing to SQLite.
 
 ---

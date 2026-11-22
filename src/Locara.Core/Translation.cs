@@ -170,24 +170,31 @@ public sealed partial class ApiProvider : ITranslationProvider
         else
         {
             string content = ExtractMessage(doc.RootElement);
-            var byWire = ReadTranslations(content, wireToReal.Keys);
+            var blankUnitIds = masked.Where(m => string.IsNullOrWhiteSpace(m.Unit.Source))
+                .Select(m => m.Unit.Id).ToHashSet(StringComparer.Ordinal);
+            var allowBlank = wireToReal.Where(kv => blankUnitIds.Contains(kv.Value))
+                .Select(kv => kv.Key).ToHashSet(StringComparer.Ordinal);
+            var byWire = ReadTranslations(content, wireToReal.Keys, allowBlank.Count > 0 ? allowBlank : null);
             result = byWire.ToDictionary(pair => wireToReal[pair.Key], pair => pair.Value, StringComparer.Ordinal);
         }
-        foreach(var item in masked){string t=Tokens.Restore(result[item.Unit.Id],item.Mask.Map);if(string.IsNullOrWhiteSpace(t))throw new InvalidDataException("Empty translation.");result[item.Unit.Id]=t;}
+        foreach(var item in masked){string t=Tokens.Restore(result[item.Unit.Id],item.Mask.Map);if(string.IsNullOrWhiteSpace(t) && !string.IsNullOrWhiteSpace(item.Unit.Source))throw new InvalidDataException("Empty translation.");result[item.Unit.Id]=string.IsNullOrWhiteSpace(item.Unit.Source)?item.Unit.Source:t;}
         return result;
     }
 
-    internal static Dictionary<string, string> ReadTranslations(string content, IEnumerable<string> ids)
+    internal static Dictionary<string, string> ReadTranslations(string content, IEnumerable<string> ids,
+        IReadOnlySet<string>? allowBlankIds = null)
     {
         const string invalid = "أعاد النموذج دفعة بصيغة غير صالحة. يلزم نص ترجمة واحد لكل معرّف مطلوب. لم تُحفظ نتائج هذه الدفعة.";
         var remaining = ids.ToHashSet(StringComparer.Ordinal);
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         void Add(string? id, JsonElement value)
         {
-            if (id == null || !remaining.Remove(id) || value.ValueKind != JsonValueKind.String
-                || string.IsNullOrWhiteSpace(value.GetString()))
+            if (id == null || !remaining.Remove(id) || value.ValueKind != JsonValueKind.String)
                 throw new InvalidDataException(invalid);
-            result.Add(id, value.GetString()!);
+            string text = value.GetString()!;
+            if (string.IsNullOrWhiteSpace(text) && allowBlankIds?.Contains(id) != true)
+                throw new InvalidDataException(invalid);
+            result.Add(id, text);
         }
 
         try

@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text;
 
 namespace Locara.Core;
@@ -360,11 +361,66 @@ public sealed class GodotTranslationFormat : IFormatHandler
         }
     }
 
+    private static byte[] DecompressRscc(byte[] bytes)
+    {
+        if (bytes.Length < 20)
+            throw new InvalidDataException("ترويسة ملف Godot RSCC مقطوعة.");
+        using var ms = new MemoryStream(bytes, writable: false);
+        using var r = new BinaryReader(ms, Encoding.UTF8, leaveOpen: true);
+        ms.Position = 4; // skip "RSCC"
+        uint mode = r.ReadUInt32(); // 0=FastLZ, 1=Deflate(Zlib), 2=Zstd, 3=Gzip
+        uint blockSize = r.ReadUInt32();
+        uint readTotal = r.ReadUInt32();
+        if (mode is not (1u or 3u))
+        {
+            string modeName = mode switch { 0u => "FastLZ", 2u => "Zstd", _ => $"#{mode}" };
+            throw new NotSupportedException($"ملف Godot .translation مضغوط بصيغة RSCC ({modeName}) غير مدعومة حالياً (المدعوم: Zlib/Deflate وGzip وRSRC غير المضغوط).");
+        }
+        if (blockSize == 0 || readTotal == 0 || readTotal > 128u * 1024u * 1024u)
+            throw new InvalidDataException("أحجام كتل RSCC غير صالحة داخل ملف .translation.");
+
+        long blockCountLong = ((long)readTotal + blockSize - 1) / blockSize;
+        if (blockCountLong <= 0 || blockCountLong > 65536 || ms.Position + blockCountLong * 4 > bytes.Length)
+            throw new InvalidDataException("جدول كتل RSCC غير صالح داخل ملف .translation.");
+
+        int blockCount = (int)blockCountLong;
+        uint[] compSizes = new uint[blockCount];
+        for (int i = 0; i < blockCount; i++)
+            compSizes[i] = r.ReadUInt32();
+
+        byte[] output = new byte[4 + readTotal];
+        "RSRC"u8.CopyTo(output.AsSpan(0, 4));
+        int written = 0;
+        for (int i = 0; i < blockCount; i++)
+        {
+            uint csize = compSizes[i];
+            if (csize == 0 || ms.Position + csize > bytes.Length)
+                throw new InvalidDataException("كتلة RSCC مضغوطة خارج حدود الملف.");
+            byte[] comp = r.ReadBytes((int)csize);
+            int expected = (int)Math.Min(blockSize, readTotal - (uint)written);
+            using var compStream = new MemoryStream(comp, writable: false);
+            using Stream decompressor = mode == 3u
+                ? new GZipStream(compStream, CompressionMode.Decompress)
+                : new ZLibStream(compStream, CompressionMode.Decompress);
+            int got = 0;
+            while (got < expected)
+            {
+                int n = decompressor.Read(output, 4 + written + got, expected - got);
+                if (n <= 0) break;
+                got += n;
+            }
+            if (got != expected)
+                throw new InvalidDataException("فشل فك ضغط كتلة RSCC داخل ملف .translation.");
+            written += got;
+        }
+        return output;
+    }
+
     private static RsrcDocument? ParseRsrc(byte[] bytes)
     {
         if (bytes.Length < 48) return null;
         if (bytes.AsSpan(0, 4).SequenceEqual("RSCC"u8))
-            throw new NotSupportedException("ملفات Godot .translation المضغوطة (RSCC) غير مدعومة حالياً.");
+            bytes = DecompressRscc(bytes);
         if (!bytes.AsSpan(0, 4).SequenceEqual("RSRC"u8)) return null;
 
         using var ms = new MemoryStream(bytes, writable: false);
