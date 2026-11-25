@@ -157,15 +157,21 @@ public sealed class StabilizationAndHardeningTests
         var plan = team.Capture(store.Units(), opts, new TeamSettings(Workers: 2, BatchSize: 1, FastMode: true));
 
         int totalCalls = 0;
+        var siblingInFlight = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var siblingCancelled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         await Assert.ThrowsAsync<HttpRequestException>(() => team.Run(plan, opts, null, send: async (req, ct) =>
         {
             int n = Interlocked.Increment(ref totalCalls);
             if (n == 1)
+            {
+                // Ensure the sibling worker is genuinely in-flight before raising the fatal 401
+                await siblingInFlight.Task.WaitAsync(TimeSpan.FromSeconds(10), ct);
                 throw new HttpRequestException("Unauthorized", null, HttpStatusCode.Unauthorized);
+            }
+            siblingInFlight.TrySetResult(true);
             try
             {
-                await Task.Delay(TimeSpan.FromMilliseconds(250), ct);
+                await Task.Delay(TimeSpan.FromSeconds(10), ct);
                 using var doc = JsonDocument.Parse(req.Data);
                 string id = doc.RootElement.GetProperty("entries")[0].GetProperty("id").GetString()!;
                 return JsonSerializer.Serialize(new Dictionary<string, string> { [id] = "سطر" });
@@ -177,7 +183,7 @@ public sealed class StabilizationAndHardeningTests
             }
         }));
 
-        Assert.True(await siblingCancelled.Task.WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.True(await siblingCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.True(totalCalls <= 2, $"Expected sibling worker to stop immediately, but saw {totalCalls} calls.");
 
         // Part B: Corrupted reviewer suggestion (drops protected token {0}) is NOT forwarded to translator
