@@ -17,6 +17,7 @@ public sealed class ProjectService(ProjectStore store)
         private Dictionary<string, bool>? i2CheckCache;
         private Dictionary<string, bool>? unityAssetsCheckCache;
         private Dictionary<string, bool>? unrealPakCheckCache;
+        private Dictionary<string, bool>? unrealStringTableCheckCache;
         public List<Diagnostic> FormatDiagnostics { get; } = [];
 
         public IFormatHandler? FormatFor(string resource)
@@ -62,6 +63,16 @@ public sealed class ProjectService(ProjectStore store)
                     unityAssetsCheckCache[resource] = hasTextAssets;
                 }
                 if (!hasTextAssets) return null;
+            }
+            if (format is UnrealStringTableFormat && Directory.Exists(Path))
+            {
+                unrealStringTableCheckCache ??= new(StringComparer.OrdinalIgnoreCase);
+                if (!unrealStringTableCheckCache.TryGetValue(resource, out bool hasSt))
+                {
+                    hasSt = UnrealStringTableFormat.HasStringTable(System.IO.Path.Combine(Path, resource));
+                    unrealStringTableCheckCache[resource] = hasSt;
+                }
+                if (!hasSt) return null;
             }
             if (format is UnrealPakFormat)
             {
@@ -189,6 +200,7 @@ public sealed class ProjectService(ProjectStore store)
             && (fmt is not UnityI2Format || UnityI2Format.HasI2Languages(Path.Combine(root, entry.Path))
                 || UnityAssetsFormat.HasTranslatableTextAssets(Path.Combine(root, entry.Path)))
             && (fmt is not UnityAssetsFormat || UnityAssetsFormat.HasTranslatableTextAssets(Path.Combine(root, entry.Path)))
+            && (fmt is not UnrealStringTableFormat || UnrealStringTableFormat.HasStringTable(Path.Combine(root, entry.Path)))
             && (fmt is not UnrealPakFormat || UnrealPakFormat.HasTranslatableLocres(Path.Combine(root, entry.Path), out _))))
             return new(root, "");
         return packages.Count switch
@@ -364,20 +376,32 @@ public sealed class ProjectService(ProjectStore store)
         {
             bool hasUnrealPak = paths.Any(path => source.FormatFor(path) is UnrealPakFormat);
             bool hasLocres = paths.Any(path => source.FormatFor(path) is UnrealLocresFormat);
+            bool hasStringTable = paths.Any(path => source.FormatFor(path) is UnrealStringTableFormat);
             bool hasIoStore = paths.Any(path => path.EndsWith(".utoc", StringComparison.OrdinalIgnoreCase));
             var launch = hasText && isSteamGame ? GameLaunch.Steam : GameLaunch.None;
             return new(profile.Name, "", hasText, scanned, launch,
                 hasUnrealPak
-                    ? "لعبة Unreal Engine 4/5 — يقرأ Locara نصوص .locres مباشرة من حزم .pak ويولّد حزمة تعديل جاهزة (Locara_Arabic_P.pak) داخل Content/Paks/~mods/ مع التثبيت المباشر وتجربة Steam دون تعديل ملفات اللعبة الأصلية."
-                    : hasLocres
-                        ? "موارد Unreal Engine (.locres) — قراءة وإعادة بناء ثنائية مباشرة مع دعم UTF-16LE للعربية."
+                    ? "لعبة Unreal Engine 4/5 — يقرأ Locara نصوص .locres وجداول StringTable (.uasset) مباشرة من حزم .pak ويولّد حزمة تعديل جاهزة (*_Locara_P.pak) أو يحدّث حزم UE5 IoStore مع التثبيت المباشر وتجربة Steam."
+                    : hasLocres || hasStringTable
+                        ? "موارد Unreal Engine (.locres / StringTable .uasset) — قراءة وإعادة بناء ثنائية مباشرة مع دعم UTF-16LE للعربية."
                         : hasText
                             ? "لعبة Unreal بملفات نصية مفتوحة قابلة للترجمة والتثبيت المباشر."
                             : hasIoStore
-                                ? "لعبة Unreal Engine 5 (IoStore .utoc/.ucas) — لم يُعثر على ملفات .locres غير مشفّرة داخل حزم .pak."
-                                : "لعبة Unreal Engine مجمّعة — لم يُعثر على ملفات .locres غير مشفّرة داخل حزم .pak (قد تكون الحزمة مشفّرة بمفتاح AES).",
-                hasUnrealPak || hasLocres
+                                ? "لعبة Unreal Engine 5 (IoStore .utoc/.ucas) — لم يُعثر على ملفات .locres أو جداول StringTable غير مشفّرة داخل حزم .pak."
+                                : "لعبة Unreal Engine مجمّعة — لم يُعثر على ملفات .locres أو StringTable غير مشفّرة داخل حزم .pak (قد تكون الحزمة مشفّرة بمفتاح AES).",
+                hasUnrealPak || hasLocres || hasStringTable
                     ? "يدعم Unreal Engine العرض العربي واتجاه RTL أصلياً عبر HarfBuzz/ICU (تُكتب النصوص بترميز UTF-16LE المنطقي دون حاجة لتشكيل مسبق)."
+                    : "");
+        }
+        if (profile.Name == "gamemaker")
+        {
+            var launch = hasText && isSteamGame ? GameLaunch.Steam : GameLaunch.None;
+            return new("gamemaker", "", hasText, scanned, launch,
+                hasText
+                    ? "لعبة GameMaker بملفات ترجمة خارجية — يدعم Locara الترجمة والتثبيت الموثّق وتجربة Steam المباشرة."
+                    : "لعبة GameMaker مجمّعة (data.win) — لم يُعثر على ملفات ترجمة خارجية مفتوحة بجانب حزمة data.win.",
+                hasText
+                    ? "تُحفظ ملفات الترجمة بترميز UTF-8؛ يعتمد عرض الحروف العربية المتصلة على دعم الخط المستخدم داخل اللعبة."
                     : "");
         }
         return new(profile.Name, "", hasText, scanned, hasText && isSteamGame ? GameLaunch.Steam : GameLaunch.None,
@@ -528,6 +552,16 @@ public sealed class ProjectService(ProjectStore store)
         string cachedAdvisories = sameSource ? store.Get("scan_advisories") : "";
         var priorAdvisories = (cachedAdvisories.Length == 0 ? [] : JsonSerializer.Deserialize<Diagnostic[]>(cachedAdvisories)!)
             .ToLookup(item => item.Path, StringComparer.Ordinal);
+        var fileSelection = LoadFileSelection(input.Package);
+        var userEditedPaths = store.Query(
+            "SELECT DISTINCT path FROM units WHERE target<>'' OR status<>'pending'",
+            r => r.GetString(0)).ToHashSet(StringComparer.Ordinal);
+        bool earlyHasPrimaryPathLocale = resources.Entries.Any(e =>
+            !Engines.IsEngineInternalMetadata(e.Path)
+            && Formats.For(e.Path) is { } f
+            && f is not UnityBundleFormat
+            && IsPrimaryLocaleSource(input.Key(e.Path)));
+        var lazySkippedSecondary = new List<(string Path, string Hash, string FormatName, string Locale)>();
         var changes = new List<(string Path, string Hash, IFormatHandler Format, IReadOnlyList<TextSlot> Slots,
             Dictionary<string, string>? LegacyLocators, string? BundleLocale)>();
         foreach (var resource in resources.Entries)
@@ -538,9 +572,22 @@ public sealed class ProjectService(ProjectStore store)
             string path = input.Key(resource.Path);
             try
             {
+                if (earlyHasPrimaryPathLocale
+                    && format is not UnityBundleFormat and not StarTruckerCatalog
+                    && ExtractPathLocale(path) is { } earlyLocale
+                    && !IsEnglishLocaleCode(earlyLocale)
+                    && !(fileSelection.TryGetValue(path, out bool explicitInc) && explicitInc)
+                    && !userEditedPaths.Contains(path))
+                {
+                    string lazyHash = resource.Hash(cancellation);
+                    lazySkippedSecondary.Add((path, lazyHash, format.Name, earlyLocale));
+                    seen.Add(path);
+                    continue;
+                }
+
                 string hash;
                 byte[]? bytes = null;
-                if ((format is UnityI2Format or UnityAssetsFormat or UnrealPakFormat) && !input.IsArchive)
+                if ((format is UnityI2Format or UnityAssetsFormat or UnrealPakFormat or UnrealStringTableFormat) && !input.IsArchive)
                 {
                     hash = resource.Hash(cancellation);
                 }
@@ -559,8 +606,10 @@ public sealed class ProjectService(ProjectStore store)
                             ? UnityAssetsFormat.ExtractFromFile(diskPath)
                             : format is UnrealPakFormat && !input.IsArchive
                                 ? UnrealPakFormat.ExtractFromFile(diskPath, cancellation)
-                                : Formats.Extract(profile, resource.Path, bytes!, format, Rules(path), rpgDataAtRoot,
-                                    message => advisories.Add(new(path, message)));
+                                : format is UnrealStringTableFormat && !input.IsArchive
+                                    ? UnrealStringTableFormat.ExtractFromFiles(diskPath)
+                                    : Formats.Extract(profile, resource.Path, bytes!, format, Rules(path), rpgDataAtRoot,
+                                        message => advisories.Add(new(path, message)));
                     if (slots.Select(slot => slot.Locator).Distinct().Count() != slots.Count)
                         throw new InvalidDataException("Ambiguous duplicate text locators.");
                     var legacyLocators = format is StarTruckerCatalog && oldFile.Hash == hash
@@ -590,7 +639,8 @@ public sealed class ProjectService(ProjectStore store)
                 string message = profile.Name switch
                 {
                     "unity" => "هذه لعبة Unity مجمّعة ولا تحتوي على ملفات نصوص مفتوحة؛ نصوصها محزومة داخل حزم ثنائية (.bundle / .assets مثل localization-string-tables-*.bundle) وتحتاج أداة فك حزم Unity أولاً. (تجاهل Locara ملفات محرك Unity الداخلية مثل RuntimeInitializeOnLoads.json تلقائياً لحماية اللعبة وتوفير رصيدك).",
-                    "unreal" => "هذه لعبة Unreal Engine مجمّعة ولم يُعثر فيها على ملفات .locres غير مشفّرة داخل حزم .pak (قد تكون الحزم مشفّرة بمفتاح AES أو تستخدم نصوصاً مدمجة في أصول UE5 IoStore).",
+                    "unreal" => "هذه لعبة Unreal Engine مجمّعة ولم يُعثر فيها على ملفات .locres أو جداول StringTable غير مشفّرة داخل حزم .pak (قد تكون الحزم مشفّرة بمفتاح AES أو تستخدم نصوصاً مدمجة في أصول UE5 IoStore).",
+                    "gamemaker" => "هذه لعبة GameMaker مجمّعة وتخزّن نصوصها داخل حزمة data.win (مقطع STRG) دون ملفات ترجمة خارجية مفتوحة (JSON/CSV/INI/PO/TOML/Lua).",
                     _ => "لم يُعثر على موارد نصية مدعومة في المصدر المختار."
                 };
                 diagnostics.Add(new(input.Path, message));
@@ -598,7 +648,7 @@ public sealed class ProjectService(ProjectStore store)
         }
 
         cancellation.ThrowIfCancellationRequested();
-        var fileSelection = LoadFileSelection(input.Package);
+        fileSelection = LoadFileSelection(input.Package);
         var fileSelectionModes = LoadFileSelectionModes(input.Package);
         store.Execute("BEGIN IMMEDIATE");
         try
@@ -655,6 +705,18 @@ public sealed class ProjectService(ProjectStore store)
                 }
             }
             bool hasPrimaryDedicatedLoc = primaryDedicatedHumanUnits >= DedicatedLocalizationMinHumanUnits;
+
+            foreach (var lazy in lazySkippedSecondary)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                store.Execute("UPDATE units SET active=0 WHERE path=$p", ("$p", lazy.Path));
+                store.Execute("""
+                    INSERT INTO files(path,hash,format,snapshot) VALUES($p,$h,$f,X'')
+                    ON CONFLICT(path) DO UPDATE SET hash=$h,format=$f,snapshot=X'',active=1
+                    """, ("$p", lazy.Path), ("$h", lazy.Hash), ("$f", lazy.FormatName));
+                advisories.Add(new(lazy.Path,
+                    $"ملف لغة أخرى ({lazy.Locale}) — استُبعد تلقائياً للاكتفاء باللغة الإنجليزية وتوفير رصيدك؛ يمكنك تفعيله من تبويب «الملفات»."));
+            }
 
             foreach (var change in changes)
             {
@@ -930,6 +992,14 @@ public sealed class ProjectService(ProjectStore store)
             {
                 reason = "ملف ترجمة Unreal Engine ثنائي (.locres) — يدعم العربية بترميز UTF-16LE أصلياً.";
             }
+            else if (format == "unreal-stringtable")
+            {
+                reason = "جدول نصوص Unreal Engine ثنائي (StringTable .uasset) — يُحدّث بترميز UTF-16LE للعربية مع مزامنة حجم الحزمة.";
+            }
+            else if (format == "strings")
+            {
+                reason = "ملف ترجمة قياسي (.strings) — يحافظ على ترميز UTF-8 / UTF-16 والتعليقات الأصلية.";
+            }
             else if (format == "godot-translation")
             {
                 reason = "ملف ترجمة Godot ثنائي (.translation / OptimizedTranslation) — يُعاد بناؤه بترميز UTF-8 مع الحفاظ على جدول التجزئة.";
@@ -971,14 +1041,15 @@ public sealed class ProjectService(ProjectStore store)
             .ToList();
     }
 
-    public void SetFileIncluded(string resourcePath, bool included, bool humanOnly = false)
+    public void SetFileIncluded(string resourcePath, bool included, bool humanOnly = false, string? password = null)
     {
         if (!included || !humanOnly)
         {
-            SetFilesIncluded(new Dictionary<string, bool>(StringComparer.Ordinal) { [resourcePath] = included });
+            SetFilesIncluded(new Dictionary<string, bool>(StringComparer.Ordinal) { [resourcePath] = included }, password);
             return;
         }
         string package = store.Get("scanned_package");
+        bool needsOnDemandExtract = false;
         store.Execute("BEGIN IMMEDIATE");
         try
         {
@@ -993,6 +1064,11 @@ public sealed class ProjectService(ProjectStore store)
                 "SELECT id, locator, source, target, status, active FROM units WHERE path=$p AND active IN (1, 2)",
                 r => (Id: r.GetString(0), Locator: r.GetString(1), Source: r.GetString(2), Target: r.GetString(3), Status: r.GetString(4), Active: r.GetInt32(5)),
                 ("$p", resourcePath));
+            if (rows.Count == 0 && format.Length > 0)
+            {
+                store.Execute("UPDATE files SET hash='' WHERE path=$p", ("$p", resourcePath));
+                needsOnDemandExtract = true;
+            }
             foreach (var row in rows)
             {
                 bool keepActive = row.Target.Length > 0
@@ -1009,12 +1085,16 @@ public sealed class ProjectService(ProjectStore store)
             store.Execute("COMMIT");
         }
         catch { store.Execute("ROLLBACK"); throw; }
+
+        if (needsOnDemandExtract)
+            Scan(password);
     }
 
-    public void SetFilesIncluded(IReadOnlyDictionary<string, bool> selections)
+    public void SetFilesIncluded(IReadOnlyDictionary<string, bool> selections, string? password = null)
     {
         if (selections.Count == 0) return;
         string package = store.Get("scanned_package");
+        bool needsOnDemandExtract = false;
         store.Execute("BEGIN IMMEDIATE");
         try
         {
@@ -1025,6 +1105,17 @@ public sealed class ProjectService(ProjectStore store)
             {
                 saved[path] = included;
                 modes.Remove(path);
+                if (included)
+                {
+                    bool wasLazySkipped = store.Query(
+                        "SELECT EXISTS(SELECT 1 FROM files WHERE path=$p AND active=1) AND NOT EXISTS(SELECT 1 FROM units WHERE path=$p AND active IN (1, 2))",
+                        r => r.GetBoolean(0), ("$p", path)).Single();
+                    if (wasLazySkipped)
+                    {
+                        store.Execute("UPDATE files SET hash='' WHERE path=$p", ("$p", path));
+                        needsOnDemandExtract = true;
+                    }
+                }
                 int fromActive = included ? 2 : 1;
                 int toActive = included ? 1 : 2;
                 store.Execute("UPDATE units SET active=$to WHERE path=$p AND active=$from",
@@ -1040,6 +1131,9 @@ public sealed class ProjectService(ProjectStore store)
             store.Execute("COMMIT");
         }
         catch { store.Execute("ROLLBACK"); throw; }
+
+        if (needsOnDemandExtract)
+            Scan(password);
     }
 
     public IReadOnlyList<FileSchemaCluster> BuildSchemaClusters()
@@ -1242,7 +1336,8 @@ public sealed class ProjectService(ProjectStore store)
         UnityArabicDisplayOptions.Parse(
             store.Get("unity_arabic_wrap"),
             store.Get("unity_arabic_font_scale"),
-            store.Get("unity_arabic_shaping"));
+            store.Get("unity_arabic_shaping"),
+            store.Get("unity_arabic_contrast"));
 
     public const string GettextPoTargetSetting = "gettext_po_target";
 
@@ -1349,6 +1444,7 @@ public sealed class ProjectService(ProjectStore store)
             : [];
         string gettextPoTarget = store.Get(GettextPoTargetSetting).Trim();
         var gettextPotDeliveries = new List<(string PotPath, Dictionary<string, string> EffectiveReplacements, byte[] RewrittenPotBytes)>();
+        var companionUexpDeliveries = new List<(string UexpRelPath, string BeforeHash, byte[] NewBytes)>();
         foreach (var entry in index.Entries)
         {
             cancellation.ThrowIfCancellationRequested();
@@ -1448,6 +1544,35 @@ public sealed class ProjectService(ProjectStore store)
                         unityTmpPatchedInResource = true;
                 }
                 if (hasArabicAsset) unityAssetsArabicUpdated = true;
+                continue;
+            }
+
+            if (format is UnrealStringTableFormat && !source.IsArchive)
+            {
+                string beforeUa = entry.Hash(cancellation);
+                if (scanned.GetValueOrDefault(key) != beforeUa)
+                    throw new InvalidOperationException("تغير المورد منذ الفحص — " + key);
+                expected[entry.Path] = beforeUa;
+                if (replacements.Count == 0) continue;
+
+                string fullUa = Directory.Exists(source.Path) ? Path.Combine(source.Path, entry.Path) : source.Path;
+                string fullUexp = Path.ChangeExtension(fullUa, ".uexp");
+                byte[] origUa = File.ReadAllBytes(fullUa);
+                byte[]? origUexp = File.Exists(fullUexp) ? File.ReadAllBytes(fullUexp) : null;
+                var (newUa, newUexp, stChanged) = UnrealStringTableFormat.ApplyPair(origUa, origUexp, replacements);
+                if (!stChanged) continue;
+
+                string afterUa = Identity.Hash(newUa);
+                expected[entry.Path] = afterUa;
+                changes.Add(new(entry.Path, beforeUa, afterUa));
+                stageChange?.Invoke(entry, newUa);
+
+                if (newUexp != null && origUexp != null && Directory.Exists(source.Path))
+                {
+                    string uexpRel = Identity.SafePath(Path.ChangeExtension(entry.Path, ".uexp"));
+                    string beforeUexp = Identity.Hash(origUexp);
+                    companionUexpDeliveries.Add((uexpRel, beforeUexp, newUexp));
+                }
                 continue;
             }
 
@@ -1554,6 +1679,14 @@ public sealed class ProjectService(ProjectStore store)
         }
         if (expected.Count != scanned.Count || expected.Count == 0)
             throw new InvalidOperationException("تغيرت قائمة الموارد أو لم يُعثر على موارد مدعومة. أعد الفحص.");
+
+        foreach (var (uexpRel, beforeUexp, newUexp) in companionUexpDeliveries)
+        {
+            string afterUexp = Identity.Hash(newUexp);
+            expected[uexpRel] = afterUexp;
+            changes.Add(new(uexpRel, beforeUexp, afterUexp));
+            stageChange?.Invoke(ResourceEntry.FromBytes(uexpRel, newUexp), newUexp);
+        }
 
         // Gettext .pot -> .po delivery (standalone Arabic .po or replacing a user-chosen sibling .po language slot)
         bool gettextPoDelivered = false;
@@ -1767,6 +1900,7 @@ public sealed class ProjectService(ProjectStore store)
                 unityWrap = unityDisplay.WrapMode,
                 unityFontScale = unityDisplay.FontScale,
                 unityShapeArabic = unityDisplay.ShapeArabic,
+                unityContrastBoost = unityDisplay.ContrastBoost,
                 notice,
                 inputs = scanned.OrderBy(entry => entry.Key, StringComparer.Ordinal),
                 changedFiles,
@@ -1890,6 +2024,7 @@ public sealed class ProjectService(ProjectStore store)
                     unityWrap = unityDisplay.WrapMode,
                     unityFontScale = unityDisplay.FontScale,
                     unityShapeArabic = unityDisplay.ShapeArabic,
+                    unityContrastBoost = unityDisplay.ContrastBoost,
                     notice = plan.Preview.Notice
                 },
                 deployment = plan.Profile.Deployment
@@ -1931,7 +2066,7 @@ public sealed class ProjectService(ProjectStore store)
 
     private static readonly HashSet<string> DedicatedLocalizationExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".po", ".pot", ".locres", ".translation", ".xlf", ".xliff"
+        ".po", ".pot", ".locres", ".translation", ".xlf", ".xliff", ".strings"
     };
 
     private static readonly HashSet<string> KnownLocaleCodes = new(StringComparer.OrdinalIgnoreCase)
@@ -1962,7 +2097,7 @@ public sealed class ProjectService(ProjectStore store)
 
     internal static bool IsDedicatedLocalizationFormat(string resourcePath, string formatName)
     {
-        if (formatName is "po" or "unreal-locres" or "unreal-pak" or "unity-i2" or "unity-bundle"
+        if (formatName is "po" or "strings" or "unreal-locres" or "unreal-stringtable" or "unreal-pak" or "unity-i2" or "unity-bundle"
             or "godot-translation" or "renpy-template" or "xunity-autotranslator" or "star-trucker-catalog")
             return true;
         if (formatName == "xml/xliff")

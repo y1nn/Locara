@@ -417,20 +417,26 @@ internal static class UnityFsStream
     private static void WriteAlign16(Stream s) { int pad = (int)((16 - (s.Position % 16)) % 16); if (pad > 0) s.Write(new byte[pad]); }
 }
 
-public sealed record UnityArabicDisplayOptions(string WrapMode = "auto", float FontScale = 0.80f, bool ShapeArabic = true)
+public sealed record UnityArabicDisplayOptions(string WrapMode = "auto", float FontScale = 0.80f, bool ShapeArabic = true, bool ContrastBoost = false)
 {
-    public static UnityArabicDisplayOptions Default { get; } = new("auto", 0.80f, true);
+    public static UnityArabicDisplayOptions Default { get; } = new("auto", 0.80f, true, false);
 
     public int MaxLineChars => ParseWrapMode(WrapMode);
 
-    public static UnityArabicDisplayOptions Parse(string? wrapSetting, string? scaleSetting, string? shapingSetting = null) =>
-        new(NormalizeWrapMode(wrapSetting), ParseFontScale(scaleSetting), ParseShapeArabic(shapingSetting));
+    public static UnityArabicDisplayOptions Parse(string? wrapSetting, string? scaleSetting, string? shapingSetting = null, string? contrastSetting = null) =>
+        new(NormalizeWrapMode(wrapSetting), ParseFontScale(scaleSetting), ParseShapeArabic(shapingSetting), ParseContrastBoost(contrastSetting));
 
     public static bool ParseShapeArabic(string? value)
     {
         string v = (value ?? "").Trim().ToLowerInvariant();
         if (v is "0" or "false" or "off" or "no") return false;
         return true;
+    }
+
+    public static bool ParseContrastBoost(string? value)
+    {
+        string v = (value ?? "").Trim().ToLowerInvariant();
+        return v is "1" or "true" or "on" or "yes";
     }
 
     public string TransformArabic(string text) =>
@@ -481,13 +487,14 @@ public sealed record UnityArabicDisplayOptions(string WrapMode = "auto", float F
 internal static class UnityTmpArabicPatcher
 {
     public static bool TryPatch(UnitySerializedFile sf, ArabicFontChoice? fontChoice, Dictionary<long, byte[]> replacements,
-        float fallbackFontScale = 0.80f)
+        float fallbackFontScale = 0.80f, bool contrastBoost = false)
     {
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 18362)) return false;
 
         UnitySerializedFile.ObjectEntry? libFont = null;
         UnitySerializedFile.ObjectEntry? fallbackAsset = null;
         UnitySerializedFile.ObjectEntry? tmpSettings = null;
+        UnitySerializedFile.ObjectEntry? fallbackMaterial = null;
 
         foreach (var obj in sf.Objects)
         {
@@ -497,6 +504,12 @@ internal static class UnityTmpArabicPatcher
                 var data = sf.Slice(obj);
                 if (TryReadName(data, 0, out string name) && name == "LiberationSans")
                     libFont = obj;
+            }
+            else if (cid == 21 && fallbackMaterial == null)
+            {
+                var data = sf.Slice(obj);
+                if (TryReadName(data, 0, out string matName) && matName == "LiberationSans SDF - Fallback Material")
+                    fallbackMaterial = obj;
             }
             else if (cid == 114 && obj.ByteSize > 36)
             {
@@ -517,6 +530,8 @@ internal static class UnityTmpArabicPatcher
         try
         {
             var chosen = fontChoice ?? ArabicFontCatalog.BuiltInFonts[0];
+            if (contrastBoost)
+                chosen = ArabicFontCatalog.ResolveContrastVariant(chosen);
             byte[] fontBytes = ArabicFontCatalog.LoadBytes(chosen);
             string fontName = string.IsNullOrWhiteSpace(chosen.FontFamilyName) ? "Noto Sans Arabic" : chosen.FontFamilyName;
 
@@ -531,6 +546,13 @@ internal static class UnityTmpArabicPatcher
             byte[]? scaledFallback = TryScaleFallbackFontAsset(sf.Slice(fallbackAsset), targetScale: clampedScale);
             if (scaledFallback != null)
                 replacements[fallbackAsset.PathId] = scaledFallback;
+
+            if (contrastBoost && fallbackMaterial != null)
+            {
+                byte[]? boostedMat = TryBoostFallbackMaterial(sf.Slice(fallbackMaterial));
+                if (boostedMat != null)
+                    replacements[fallbackMaterial.PathId] = boostedMat;
+            }
             return true;
         }
         catch
@@ -573,7 +595,7 @@ internal static class UnityTmpArabicPatcher
             var sf = UnitySerializedFile.TryRead(resBytes);
             if (sf == null) return false;
             var replacements = new Dictionary<long, byte[]>();
-            if (!TryPatch(sf, fontChoice, replacements, opts.FontScale) || replacements.Count == 0)
+            if (!TryPatch(sf, fontChoice, replacements, opts.FontScale, opts.ContrastBoost) || replacements.Count == 0)
                 return false;
             byte[] rewrittenRes = sf.Rewrite(replacements);
             UnityFsStream.PatchNode(sourceFilePath, destinationFilePath, "resources.assets", rewrittenRes, cancellation);
@@ -585,7 +607,7 @@ internal static class UnityTmpArabicPatcher
             var sf = UnitySerializedFile.TryRead(orig);
             if (sf == null) return false;
             var replacements = new Dictionary<long, byte[]>();
-            if (!TryPatch(sf, fontChoice, replacements, opts.FontScale) || replacements.Count == 0)
+            if (!TryPatch(sf, fontChoice, replacements, opts.FontScale, opts.ContrastBoost) || replacements.Count == 0)
                 return false;
             byte[] rewritten = sf.Rewrite(replacements);
             Directory.CreateDirectory(Path.GetDirectoryName(destinationFilePath)!);
@@ -620,6 +642,29 @@ internal static class UnityTmpArabicPatcher
 
         byte[] updated = fallbackData.ToArray();
         BinaryPrimitives.WriteSingleLittleEndian(updated.AsSpan(pos + 4), targetScale);
+        return updated;
+    }
+
+    internal static byte[]? TryBoostFallbackMaterial(ReadOnlySpan<byte> materialData, float targetFaceDilate = 0.16f)
+    {
+        if (!TryReadName(materialData, 0, out string matName) || matName != "LiberationSans SDF - Fallback Material")
+            return null;
+
+        // Locate aligned "_FaceDilate" (len 11 + "_FaceDilate\0") inside m_SavedProperties.m_Floats
+        ReadOnlySpan<byte> propName = "_FaceDilate"u8;
+        int idx = materialData.IndexOf(propName);
+        if (idx < 4) return null;
+        if (BinaryPrimitives.ReadInt32LittleEndian(materialData[(idx - 4)..]) != propName.Length)
+            return null;
+
+        int floatOffset = idx + ((propName.Length + 3) & ~3);
+        if (floatOffset + 4 > materialData.Length) return null;
+        float current = BinaryPrimitives.ReadSingleLittleEndian(materialData[floatOffset..]);
+        if (float.IsNaN(current) || current is < -1.0f or > 1.0f) return null;
+        if (current >= targetFaceDilate - 0.001f) return null;
+
+        byte[] updated = materialData.ToArray();
+        BinaryPrimitives.WriteSingleLittleEndian(updated.AsSpan(floatOffset), targetFaceDilate);
         return updated;
     }
 
@@ -889,7 +934,7 @@ public sealed class UnityI2Format : IFormatHandler
         var replacements = new Dictionary<long, byte[]>();
         bool hasArabic = translations.Values.Any(StarTruckerDisplay.HasArabic);
         if (hasArabic)
-            arabicFontPatched = UnityTmpArabicPatcher.TryPatch(sf, fontChoice, replacements, opts.FontScale);
+            arabicFontPatched = UnityTmpArabicPatcher.TryPatch(sf, fontChoice, replacements, opts.FontScale, opts.ContrastBoost);
 
         bool anyI2Changed = false;
         foreach (var (obj, parsed) in FindI2Objects(sf))

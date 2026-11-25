@@ -4,7 +4,7 @@ using System.Text;
 namespace Locara.Core;
 
 /// <summary>
-/// Pure-C# Godot 3 &amp; 4 binary .translation resource (RSRC) reader and writer.
+/// Pure-C# Godot 3 &amp; 4 binary .translation resource (RSRC and compressed RSCC: FastLZ, Zlib/Deflate, Zstd, Gzip) reader and writer.
 /// Supports both OptimizedTranslation / PHashTranslation (hash_table + bucket_table + SMAZ-compressed strings)
 /// and uncompressed Translation (messages PackedStringArray or Dictionary).
 /// </summary>
@@ -371,11 +371,8 @@ public sealed class GodotTranslationFormat : IFormatHandler
         uint mode = r.ReadUInt32(); // 0=FastLZ, 1=Deflate(Zlib), 2=Zstd, 3=Gzip
         uint blockSize = r.ReadUInt32();
         uint readTotal = r.ReadUInt32();
-        if (mode is not (1u or 3u))
-        {
-            string modeName = mode switch { 0u => "FastLZ", 2u => "Zstd", _ => $"#{mode}" };
-            throw new NotSupportedException($"ملف Godot .translation مضغوط بصيغة RSCC ({modeName}) غير مدعومة حالياً (المدعوم: Zlib/Deflate وGzip وRSRC غير المضغوط).");
-        }
+        if (mode > 3u)
+            throw new NotSupportedException($"ملف Godot .translation مضغوط بصيغة RSCC (#{mode}) غير مدعومة حالياً (المدعوم: FastLZ وZlib/Deflate وZstd وGzip وRSRC غير المضغوط).");
         if (blockSize == 0 || readTotal == 0 || readTotal > 128u * 1024u * 1024u)
             throw new InvalidDataException("أحجام كتل RSCC غير صالحة داخل ملف .translation.");
 
@@ -391,6 +388,7 @@ public sealed class GodotTranslationFormat : IFormatHandler
         byte[] output = new byte[4 + readTotal];
         "RSRC"u8.CopyTo(output.AsSpan(0, 4));
         int written = 0;
+        using var zstd = mode == 2u ? new ZstdSharp.Decompressor() : null;
         for (int i = 0; i < blockCount; i++)
         {
             uint csize = compSizes[i];
@@ -398,22 +396,113 @@ public sealed class GodotTranslationFormat : IFormatHandler
                 throw new InvalidDataException("كتلة RSCC مضغوطة خارج حدود الملف.");
             byte[] comp = r.ReadBytes((int)csize);
             int expected = (int)Math.Min(blockSize, readTotal - (uint)written);
-            using var compStream = new MemoryStream(comp, writable: false);
-            using Stream decompressor = mode == 3u
-                ? new GZipStream(compStream, CompressionMode.Decompress)
-                : new ZLibStream(compStream, CompressionMode.Decompress);
-            int got = 0;
-            while (got < expected)
+            if (mode == 2u)
             {
-                int n = decompressor.Read(output, 4 + written + got, expected - got);
-                if (n <= 0) break;
-                got += n;
+                int got = zstd!.Unwrap(comp, output.AsSpan(4 + written, expected));
+                if (got != expected)
+                    throw new InvalidDataException("فشل فك ضغط كتلة RSCC (Zstd) داخل ملف .translation.");
+                written += got;
             }
-            if (got != expected)
-                throw new InvalidDataException("فشل فك ضغط كتلة RSCC داخل ملف .translation.");
-            written += got;
+            else if (mode == 0u)
+            {
+                DecompressFastLzBlock(comp, output.AsSpan(4 + written, expected));
+                written += expected;
+            }
+            else
+            {
+                using var compStream = new MemoryStream(comp, writable: false);
+                using Stream decompressor = mode == 3u
+                    ? new GZipStream(compStream, CompressionMode.Decompress)
+                    : new ZLibStream(compStream, CompressionMode.Decompress);
+                int got = 0;
+                while (got < expected)
+                {
+                    int n = decompressor.Read(output, 4 + written + got, expected - got);
+                    if (n <= 0) break;
+                    got += n;
+                }
+                if (got != expected)
+                    throw new InvalidDataException("فشل فك ضغط كتلة RSCC داخل ملف .translation.");
+                written += got;
+            }
         }
         return output;
+    }
+
+    private static void DecompressFastLzBlock(ReadOnlySpan<byte> input, Span<byte> output)
+    {
+        if (input.IsEmpty)
+            throw new InvalidDataException("كتلة FastLZ فارغة داخل ملف .translation.");
+        int level = (input[0] >> 5) + 1;
+        if (level is not (1 or 2))
+            throw new InvalidDataException($"مستوى FastLZ غير صالح ({level}) داخل ملف .translation.");
+
+        int ip = 0;
+        int op = 0;
+        int ctrl = input[ip++] & 31;
+        while (true)
+        {
+            if (ctrl >= 32)
+            {
+                int len = (ctrl >> 5) - 1;
+                int ofs = (ctrl & 31) << 8;
+                if (level == 1)
+                {
+                    if (len == 6)
+                    {
+                        if (ip >= input.Length) throw new InvalidDataException("بيانات FastLZ مقطوعة.");
+                        len += input[ip++];
+                    }
+                    if (ip >= input.Length) throw new InvalidDataException("بيانات FastLZ مقطوعة.");
+                    ofs += input[ip++];
+                }
+                else
+                {
+                    if (len == 6)
+                    {
+                        byte code;
+                        do
+                        {
+                            if (ip >= input.Length) throw new InvalidDataException("بيانات FastLZ مقطوعة.");
+                            code = input[ip++];
+                            len += code;
+                        } while (code == 255);
+                    }
+                    if (ip >= input.Length) throw new InvalidDataException("بيانات FastLZ مقطوعة.");
+                    byte low = input[ip++];
+                    ofs += low;
+                    if (low == 255 && (ctrl & 31) == 31)
+                    {
+                        if (ip + 2 > input.Length) throw new InvalidDataException("بيانات FastLZ مقطوعة.");
+                        int far = (input[ip] << 8) | input[ip + 1];
+                        ip += 2;
+                        ofs = far + 8191;
+                    }
+                }
+
+                int refPos = op - ofs - 1;
+                len += 3;
+                if (refPos < 0 || op + len > output.Length)
+                    throw new InvalidDataException("مرجع FastLZ خارج حدود كتلة الإخراج.");
+                for (int k = 0; k < len; k++)
+                    output[op++] = output[refPos++];
+            }
+            else
+            {
+                int litLen = ctrl + 1;
+                if (ip + litLen > input.Length || op + litLen > output.Length)
+                    throw new InvalidDataException("بيانات FastLZ الحرفية تتجاوز حدود الكتلة.");
+                input.Slice(ip, litLen).CopyTo(output.Slice(op, litLen));
+                ip += litLen;
+                op += litLen;
+            }
+
+            if (ip >= input.Length) break;
+            ctrl = input[ip++];
+        }
+
+        if (op != output.Length)
+            throw new InvalidDataException("حجم مخرجات FastLZ لا يطابق الحجم المتوقع.");
     }
 
     private static RsrcDocument? ParseRsrc(byte[] bytes)

@@ -100,7 +100,8 @@ public partial class MainWindow:Window
                     DisplayFont: project.Get("display_font"),
                     UnityWrap: project.Get("unity_arabic_wrap"),
                     UnityScale: project.Get("unity_arabic_font_scale"),
-                    UnityShaping: project.Get("unity_arabic_shaping"));
+                    UnityShaping: project.Get("unity_arabic_shaping"),
+                    UnityContrast: project.Get("unity_arabic_contrast"));
             });
             if (!IsLoaded) return false;
 
@@ -125,7 +126,7 @@ public partial class MainWindow:Window
             agentByWorker.Clear();
             liveEvents.Clear();
             LoadTeamRoleSettings(opened.TeamSettings);
-            LoadDisplayFontSelector(opened.DisplayFont, opened.UnityWrap, opened.UnityScale, opened.UnityShaping);
+            LoadDisplayFontSelector(opened.DisplayFont, opened.UnityWrap, opened.UnityScale, opened.UnityShaping, opened.UnityContrast);
             RefreshDirectInstallStatus();
             RefreshScannedFiles();
             PackageChoices.ItemsSource = null;

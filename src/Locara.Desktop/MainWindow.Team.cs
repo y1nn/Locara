@@ -158,6 +158,11 @@ public partial class MainWindow
         AgentsGrid.ItemsSource = liveAgents;
         ActivityLog.ItemsSource = liveEvents;
         WorkerRoutingList.ItemsSource = workerRoutingRows;
+        if (PromptPresetSelector != null)
+        {
+            PromptPresetSelector.ItemsSource = ArabicPromptPresets.All;
+            PromptPresetSelector.SelectedIndex = 0;
+        }
         RefreshRoutingOptions();
     }
 
@@ -458,6 +463,27 @@ public partial class MainWindow
         TranslatorPromptInput.Clear();
         ReviewerPromptInput.Clear();
         Status.Text = "أُعيدت قوالب الأدوار الافتراضية. اضغط «حفظ إعدادات الأدوار» لتثبيتها.";
+    }
+
+    private void ApplySelectedPromptPreset(object sender, RoutedEventArgs e)
+    {
+        if (PromptPresetSelector?.SelectedItem is not ArabicPromptPreset preset) return;
+        TeamStyleInput.Text = preset.Style;
+        SupervisorPromptInput.Text = preset.Supervisor;
+        TranslatorPromptInput.Text = preset.Translator;
+        ReviewerPromptInput.Text = preset.Reviewer;
+        if (projectPath != null)
+        {
+            try
+            {
+                using var project = new ProjectStore(projectPath);
+                new TranslationTeam(project).Settings = ReadInlineTeamSettings(reviewDrafts: false);
+                Status.Text = $"طُبّق وحُفظ قالب التوجيهات «{preset.Name}» لهذا المشروع.";
+                return;
+            }
+            catch (Exception error) { Status.Text = error.Message; return; }
+        }
+        Status.Text = $"طُبّق قالب «{preset.Name}» في حقول التوجيهات.";
     }
 
     private void PreviewTeamPrompts(object sender, RoutedEventArgs e)

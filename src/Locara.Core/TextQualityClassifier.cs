@@ -161,7 +161,7 @@ public static partial class TextQualityClassifier
 
     private static bool IsOpenDataFormat(string? format) =>
         string.IsNullOrEmpty(format)
-        || format is "json" or "yaml" or "xml/xliff" or "ini" or "csv" or "tsv" or "xlsx" or "unity-assets";
+        || format is "json" or "yaml" or "toml" or "lua" or "xml/xliff" or "ini" or "csv" or "tsv" or "xlsx" or "unity-assets";
 
     public static StringQuality ClassifyEntry(string? locator, string? text, string? format = null)
     {

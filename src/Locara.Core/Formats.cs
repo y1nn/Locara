@@ -12,19 +12,19 @@ namespace Locara.Core;
 
 public static class Formats
 {
-    public static IReadOnlyList<IFormatHandler> All { get; } = [new JsonFormat(), new DelimitedFormat(','), new DelimitedFormat('\t'), new XmlFormat(), new IniFormat(), new YamlFormat(), new PoFormat(), new SpreadsheetFormat(), new RenpyFormat(), new UnityBundleFormat(), UnityI2Format.Instance, UnityAssetsFormat.Instance, UnrealLocresFormat.Instance, UnrealPakFormat.Instance, GodotTranslationFormat.Instance, XUnityTranslationFormat.Instance];
+    public static IReadOnlyList<IFormatHandler> All { get; } = [new JsonFormat(), new DelimitedFormat(','), new DelimitedFormat('\t'), new XmlFormat(), new IniFormat(), new YamlFormat(), TomlFormat.Instance, StringsFormat.Instance, LuaFormat.Instance, new PoFormat(), new SpreadsheetFormat(), new RenpyFormat(), new UnityBundleFormat(), UnityI2Format.Instance, UnityAssetsFormat.Instance, UnrealLocresFormat.Instance, UnrealStringTableFormat.Instance, UnrealPakFormat.Instance, GodotTranslationFormat.Instance, XUnityTranslationFormat.Instance];
     internal static bool IsArabicTarget(string? language) => string.IsNullOrWhiteSpace(language)
         || language.Split('-', '_')[0].Equals("ar", StringComparison.OrdinalIgnoreCase)
         || language.Equals("arabic", StringComparison.OrdinalIgnoreCase);
     public static IFormatHandler? For(string path) => All.FirstOrDefault(f => f.Supports(path));
 
-    public static bool Configurable(string path) => For(path) is DelimitedFormat or SpreadsheetFormat or JsonFormat or XmlFormat or IniFormat or YamlFormat;
+    public static bool Configurable(string path) => For(path) is DelimitedFormat or SpreadsheetFormat or JsonFormat or XmlFormat or IniFormat or YamlFormat or TomlFormat or LuaFormat;
 
     internal static ExtractionPreview Inspect(byte[] bytes, IFormatHandler format, ExtractionRule? rule) => format switch
     {
         DelimitedFormat table => new([table.Inspect(bytes)], [], rule),
         SpreadsheetFormat workbook => new(workbook.Inspect(bytes), [], rule),
-        JsonFormat or XmlFormat or IniFormat or YamlFormat or StarTruckerCatalog => new([], format.Extract(bytes), rule),
+        JsonFormat or XmlFormat or IniFormat or YamlFormat or TomlFormat or LuaFormat or StarTruckerCatalog => new([], format.Extract(bytes), rule),
         _ => throw new NotSupportedException("هذا المورد يستخدم قواعد المحرك والصيغة الحالية.")
     };
 

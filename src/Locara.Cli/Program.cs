@@ -8,7 +8,7 @@ if(args.Length==0||args[0] is "help" or "--help")
     Console.WriteLine("""
         Locara
         steam
-        create <project-folder> <source-folder-or-file> [auto|generic|godot|rpgmaker|renpy|unity|unreal]
+        create <project-folder> <source-folder-or-file> [auto|generic|godot|rpgmaker|renpy|unity|unreal|gamemaker]
         source <project-folder> <path> [--relocate]
         packages <project-folder>
         languages <project-folder>
@@ -122,7 +122,7 @@ try
         case "exclude":
             if (args.Length < 3 || args.Length > 4) throw new ArgumentException($"{args[0]} <project-folder> <file-path> [--human-only]");
             bool humanOnly = args[0] == "include" && args.Contains("--human-only");
-            service.SetFileIncluded(args[2], args[0] == "include", humanOnly);
+            service.SetFileIncluded(args[2], args[0] == "include", humanOnly, password);
             Console.WriteLine($"{(args[0] == "include" ? (humanOnly ? "Included (human-only)" : "Included") : "Excluded")} {args[2]}");
             break;
         case "list":Console.WriteLine(JsonSerializer.Serialize(project.Units(args.ElementAtOrDefault(2)??"",int.Parse(args.ElementAtOrDefault(3)??"0")),new JsonSerializerOptions{WriteIndented=true}));break;

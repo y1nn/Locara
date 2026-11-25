@@ -116,6 +116,11 @@
         "resolved": "16.3.0",
         "contentHash": "SgMOdxbz8X65z8hraIs6hOEdnkH6hESTAIUa7viEngHOYaH+6q5XJmwr1+yb9vJpNQ19hCQY69xbFsLtXpobQA=="
       },
+      "ZstdSharp.Port": {
+        "type": "Transitive",
+        "resolved": "0.8.5",
+        "contentHash": "TR4j17WeVSEb3ncgL2NqlXEqcy04I+Kk9CaebNDplUeL8XOgjkZ7fP4Wg4grBdPLIqsV86p2QaXTkZoRMVOsew=="
+      },
       "locara.core": {
         "type": "Project",
         "dependencies": {
@@ -123,7 +128,8 @@
           "Microsoft.Data.Sqlite": "[10.0.15, )",
           "SQLitePCLRaw.bundle_e_sqlite3": "[3.0.5, )",
           "SharpZipLib": "[1.4.2, )",
-          "YamlDotNet": "[16.3.0, )"
+          "YamlDotNet": "[16.3.0, )",
+          "ZstdSharp.Port": "[0.8.5, )"
         }
       }
     },

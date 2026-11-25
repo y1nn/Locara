@@ -233,7 +233,7 @@ public partial class MainWindow
             var existing = PackageInstaller.GetInPlaceStatus(project);
             string engine = project.Get("scanned_engine");
             var font = ArabicFontCatalog.Resolve(project.Get("display_font"), CustomFontsDir);
-            var unityDisplay = UnityArabicDisplayOptions.Parse(project.Get("unity_arabic_wrap"), project.Get("unity_arabic_font_scale"), project.Get("unity_arabic_shaping"));
+            var unityDisplay = UnityArabicDisplayOptions.Parse(project.Get("unity_arabic_wrap"), project.Get("unity_arabic_font_scale"), project.Get("unity_arabic_shaping"), project.Get("unity_arabic_contrast"));
             return (Destination: destination, Running: running, Existing: existing, Engine: engine, FontName: font.DisplayName, UnityDisplay: unityDisplay);
         });
 

@@ -13,7 +13,7 @@ public partial class MainWindow
     private static string FontPreviewCacheDir => Path.Combine(UserData, "font-preview-cache");
     private bool loadingDisplayFont;
 
-    private void LoadDisplayFontSelector(string? savedFontId, string? savedUnityWrap = null, string? savedUnityScale = null, string? savedUnityShaping = null)
+    private void LoadDisplayFontSelector(string? savedFontId, string? savedUnityWrap = null, string? savedUnityScale = null, string? savedUnityShaping = null, string? savedUnityContrast = null)
     {
         loadingDisplayFont = true;
         try
@@ -26,15 +26,15 @@ public partial class MainWindow
             if (DisplayFontSelector.SelectedItem is ArabicFontChoice selected)
                 UpdateFontPreview(selected);
 
-            if (savedUnityWrap != null || savedUnityScale != null || savedUnityShaping != null)
-                LoadUnityArabicDisplayControls(savedUnityWrap, savedUnityScale, savedUnityShaping);
+            if (savedUnityWrap != null || savedUnityScale != null || savedUnityShaping != null || savedUnityContrast != null)
+                LoadUnityArabicDisplayControls(savedUnityWrap, savedUnityScale, savedUnityShaping, savedUnityContrast);
         }
         finally { loadingDisplayFont = false; }
     }
 
-    private void LoadUnityArabicDisplayControls(string? savedUnityWrap, string? savedUnityScale, string? savedUnityShaping)
+    private void LoadUnityArabicDisplayControls(string? savedUnityWrap, string? savedUnityScale, string? savedUnityShaping, string? savedUnityContrast = null)
     {
-        var opts = UnityArabicDisplayOptions.Parse(savedUnityWrap, savedUnityScale, savedUnityShaping);
+        var opts = UnityArabicDisplayOptions.Parse(savedUnityWrap, savedUnityScale, savedUnityShaping, savedUnityContrast);
         string wrapTag = opts.WrapMode;
         UnityWrapModeSelector.SelectedItem = UnityWrapModeSelector.Items.OfType<ComboBoxItem>()
             .FirstOrDefault(i => string.Equals(i.Tag?.ToString(), wrapTag, StringComparison.OrdinalIgnoreCase))
@@ -47,6 +47,7 @@ public partial class MainWindow
                 .FirstOrDefault(i => string.Equals(i.Tag?.ToString(), "0.80", StringComparison.OrdinalIgnoreCase));
 
         UnityArabicShapingToggle.IsChecked = opts.ShapeArabic;
+        if (UnityContrastBoostToggle != null) UnityContrastBoostToggle.IsChecked = opts.ContrastBoost;
         UnityWrapModeSelector.IsEnabled = opts.ShapeArabic;
     }
 
@@ -56,15 +57,18 @@ public partial class MainWindow
         string wrap = (UnityWrapModeSelector.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "auto";
         string scale = (UnityFontScaleSelector.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "0.80";
         bool shape = UnityArabicShapingToggle.IsChecked != false;
+        bool contrast = UnityContrastBoostToggle?.IsChecked == true;
         UnityWrapModeSelector.IsEnabled = shape;
         try
         {
-            var opts = UnityArabicDisplayOptions.Parse(wrap, scale, shape ? "1" : "0");
+            var opts = UnityArabicDisplayOptions.Parse(wrap, scale, shape ? "1" : "0", contrast ? "1" : "0");
             using var project = new ProjectStore(projectPath);
             project.Set("unity_arabic_wrap", opts.WrapMode);
             project.Set("unity_arabic_font_scale", opts.FontScale.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
             project.Set("unity_arabic_shaping", opts.ShapeArabic ? "1" : "0");
-            Status.Text = $"تم حفظ إعدادات العرض العربي لـ Unity (الالتفاف: {opts.WrapLabel} · الحجم: {opts.ScaleLabel}).";
+            project.Set("unity_arabic_contrast", opts.ContrastBoost ? "1" : "0");
+            string contrastLabel = opts.ContrastBoost ? " · تباين معزّز" : "";
+            Status.Text = $"تم حفظ إعدادات العرض العربي لـ Unity (الالتفاف: {opts.WrapLabel} · الحجم: {opts.ScaleLabel}{contrastLabel}).";
         }
         catch (Exception error) { Status.Text = error.Message; }
     }

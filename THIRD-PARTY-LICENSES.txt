@@ -34,6 +34,11 @@ fonts, and components. Each component remains subject to its respective license.
   License: MIT License
   https://github.com/ClosedXML/ClosedXML
 
+* ZstdSharp.Port (0.8.5)
+  Copyright (c) Oleg Stepanischev and Contributors (port of Meta Zstandard)
+  License: MIT License
+  https://github.com/oleg-st/ZstdSharp
+
 -------------------------------------------------------------------------------
 2. TEST LIBRARIES (Development / Locara.Checks only, not shipped in releases)
 -------------------------------------------------------------------------------
@@ -76,3 +81,8 @@ fonts, and components. Each component remains subject to its respective license.
   Original SMAZ algorithm Copyright (c) 2006-2009 Salvatore Sanfilippo (antirez)
   License: BSD 3-Clause License
   https://github.com/antirez/smaz
+
+* FastLZ Decompression Algorithm (used in Godot RSCC mode 0 .translation reader)
+  Original FastLZ algorithm Copyright (c) 2007-2020 Ariya Hidayat
+  License: MIT License
+  https://github.com/ariya/FastLZ

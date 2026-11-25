@@ -257,7 +257,7 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
         var opts = displayOptions ?? UnityArabicDisplayOptions.Default;
         var replacements = new Dictionary<long, byte[]>();
         if (anyArabic || allowTmpOnly)
-            arabicFontPatched = UnityTmpArabicPatcher.TryPatch(sf, fontChoice, replacements, opts.FontScale);
+            arabicFontPatched = UnityTmpArabicPatcher.TryPatch(sf, fontChoice, replacements, opts.FontScale, opts.ContrastBoost);
 
         bool shouldShape = (arabicFontPatched || applyShaping) && opts.ShapeArabic;
         bool anyTextChanged = false;

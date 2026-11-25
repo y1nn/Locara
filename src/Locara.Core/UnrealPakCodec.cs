@@ -977,7 +977,8 @@ public sealed class UnrealPakFormat : IFormatHandler
         {
             if (!UnrealPakCodec.IsUnrealPakFile(pakPath)) return false;
             var info = UnrealPakCodec.ReadIndex(pakPath);
-            return SelectPrimaryLocresEntries(info.Entries).Count > 0;
+            return SelectPrimaryLocresEntries(info.Entries).Count > 0
+                || SelectStringTableEntries(pakPath, info).Count > 0;
         }
         catch (NotSupportedException ex)
         {
@@ -994,9 +995,11 @@ public sealed class UnrealPakFormat : IFormatHandler
     {
         var info = UnrealPakCodec.ReadIndex(pakPath, cancellation);
         var selected = SelectPrimaryLocresEntries(info.Entries);
-        if (selected.Count == 0) return [];
+        var stringTables = SelectStringTableEntries(pakPath, info, cancellation);
+        if (selected.Count == 0 && stringTables.Count == 0) return [];
 
         var slots = new List<TextSlot>();
+        int totalSources = selected.Count + stringTables.Count;
         foreach (var entry in selected)
         {
             cancellation.ThrowIfCancellationRequested();
@@ -1006,7 +1009,23 @@ public sealed class UnrealPakFormat : IFormatHandler
             foreach (var slot in extracted)
             {
                 string locator = MakePakLocator(entry.Path, slot.Locator);
-                string context = selected.Count > 1 ? $"{fileLabel} · {slot.Context}" : slot.Context;
+                string context = totalSources > 1 ? $"{fileLabel} · {slot.Context}" : slot.Context;
+                slots.Add(new TextSlot(locator, slot.Source, context));
+            }
+        }
+        foreach (var (uassetEntry, uexpEntry) in stringTables)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            byte[] uassetBytes = UnrealPakCodec.ReadEntryBytes(pakPath, uassetEntry, info.Version, info.CompressionMethods, cancellation);
+            byte[]? uexpBytes = uexpEntry != null
+                ? UnrealPakCodec.ReadEntryBytes(pakPath, uexpEntry, info.Version, info.CompressionMethods, cancellation)
+                : null;
+            var extracted = UnrealStringTableFormat.ExtractPair(uassetBytes, uexpBytes);
+            string fileLabel = Path.GetFileNameWithoutExtension(uassetEntry.Path);
+            foreach (var slot in extracted)
+            {
+                string locator = MakePakStringTableLocator(uassetEntry.Path, slot.Locator);
+                string context = totalSources > 1 ? $"{fileLabel} · {slot.Context}" : slot.Context;
                 slots.Add(new TextSlot(locator, slot.Source, context));
             }
         }
@@ -1019,17 +1038,30 @@ public sealed class UnrealPakFormat : IFormatHandler
     {
         var info = UnrealPakCodec.ReadIndex(pakPath, cancellation);
         var grouped = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+        var groupedStringTables = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
         bool anyArabic = false;
         foreach (var (locator, target) in translations)
         {
-            if (!TrySplitPakLocator(locator, out string entryPath, out string innerLocator)) continue;
-            if (StarTruckerDisplay.HasArabic(target)) anyArabic = true;
-            if (!grouped.TryGetValue(entryPath, out var map))
+            if (TrySplitPakLocator(locator, out string entryPath, out string innerLocator))
             {
-                map = new Dictionary<string, string>(StringComparer.Ordinal);
-                grouped[entryPath] = map;
+                if (StarTruckerDisplay.HasArabic(target)) anyArabic = true;
+                if (!grouped.TryGetValue(entryPath, out var map))
+                {
+                    map = new Dictionary<string, string>(StringComparer.Ordinal);
+                    grouped[entryPath] = map;
+                }
+                map[innerLocator] = target;
             }
-            map[innerLocator] = target;
+            else if (TrySplitPakStringTableLocator(locator, out string stPath, out string stInner))
+            {
+                if (StarTruckerDisplay.HasArabic(target)) anyArabic = true;
+                if (!groupedStringTables.TryGetValue(stPath, out var stMap))
+                {
+                    stMap = new Dictionary<string, string>(StringComparer.Ordinal);
+                    groupedStringTables[stPath] = stMap;
+                }
+                stMap[stInner] = target;
+            }
         }
 
         var patched = new List<UnrealPakPatchFile>();
@@ -1042,6 +1074,26 @@ public sealed class UnrealPakFormat : IFormatHandler
             byte[] updatedLocres = UnrealLocresFormat.Instance.Apply(originalLocres, innerTranslations);
             if (!ReferenceEquals(updatedLocres, originalLocres))
                 patched.Add(new UnrealPakPatchFile(entry.Path, updatedLocres));
+        }
+
+        foreach (var (stPath, innerTranslations) in groupedStringTables)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            var uassetEntry = info.Entries.FirstOrDefault(e => e.Path.Equals(stPath, StringComparison.OrdinalIgnoreCase));
+            if (uassetEntry == null) continue;
+            string expectedUexpPath = Path.ChangeExtension(uassetEntry.Path, ".uexp").Replace('\\', '/');
+            var uexpEntry = info.Entries.FirstOrDefault(e => e.Path.Equals(expectedUexpPath, StringComparison.OrdinalIgnoreCase));
+            byte[] origUasset = UnrealPakCodec.ReadEntryBytes(pakPath, uassetEntry, info.Version, info.CompressionMethods, cancellation);
+            byte[]? origUexp = uexpEntry != null
+                ? UnrealPakCodec.ReadEntryBytes(pakPath, uexpEntry, info.Version, info.CompressionMethods, cancellation)
+                : null;
+            var (newUasset, newUexp, changed) = UnrealStringTableFormat.ApplyPair(origUasset, origUexp, innerTranslations);
+            if (changed)
+            {
+                patched.Add(new UnrealPakPatchFile(uassetEntry.Path, newUasset));
+                if (uexpEntry != null && newUexp != null)
+                    patched.Add(new UnrealPakPatchFile(uexpEntry.Path, newUexp));
+            }
         }
 
         string? injectedFontName = null;
@@ -1229,11 +1281,19 @@ public sealed class UnrealPakFormat : IFormatHandler
     internal static string MakePakLocator(string entryPath, string innerLocator) =>
         $"paklocres:{entryPath.Length}:{entryPath}|{innerLocator}";
 
-    internal static bool TrySplitPakLocator(string locator, out string entryPath, out string innerLocator)
+    internal static string MakePakStringTableLocator(string entryPath, string innerLocator) =>
+        $"pakst:{entryPath.Length}:{entryPath}|{innerLocator}";
+
+    internal static bool TrySplitPakLocator(string locator, out string entryPath, out string innerLocator) =>
+        TrySplitPrefixedLocator(locator, "paklocres:", out entryPath, out innerLocator);
+
+    internal static bool TrySplitPakStringTableLocator(string locator, out string entryPath, out string innerLocator) =>
+        TrySplitPrefixedLocator(locator, "pakst:", out entryPath, out innerLocator);
+
+    private static bool TrySplitPrefixedLocator(string locator, string prefix, out string entryPath, out string innerLocator)
     {
         entryPath = "";
         innerLocator = "";
-        const string prefix = "paklocres:";
         if (!locator.StartsWith(prefix, StringComparison.Ordinal)) return false;
         int colon = locator.IndexOf(':', prefix.Length);
         if (colon < 0) return false;
@@ -1243,5 +1303,40 @@ public sealed class UnrealPakFormat : IFormatHandler
         entryPath = locator.Substring(pathStart, len);
         innerLocator = locator[(pathStart + len + 1)..];
         return true;
+    }
+
+    internal static List<(UnrealPakEntryInfo Uasset, UnrealPakEntryInfo? Uexp)> SelectStringTableEntries(
+        string pakPath,
+        UnrealPakArchiveInfo info,
+        CancellationToken cancellation = default)
+    {
+        var candidateUassets = info.Entries
+            .Where(e => !e.IsEncrypted
+                && e.Path.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase)
+                && !e.Path.StartsWith("Engine/", StringComparison.OrdinalIgnoreCase)
+                && e.UncompressedSize is >= 64 and <= 4 * 1024 * 1024)
+            .ToList();
+        if (candidateUassets.Count == 0) return [];
+
+        var byPath = info.Entries.ToDictionary(e => e.Path, StringComparer.OrdinalIgnoreCase);
+        var matched = new List<(UnrealPakEntryInfo Uasset, UnrealPakEntryInfo? Uexp)>();
+        foreach (var ua in candidateUassets)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            try
+            {
+                byte[] uaBytes = UnrealPakCodec.ReadEntryBytes(pakPath, ua, info.Version, info.CompressionMethods, cancellation);
+                if (!UnrealStringTableFormat.IsStringTableHeader(uaBytes)) continue;
+                string uexpPath = Path.ChangeExtension(ua.Path, ".uexp").Replace('\\', '/');
+                byPath.TryGetValue(uexpPath, out var uexpEntry);
+                byte[]? uexpBytes = uexpEntry != null
+                    ? UnrealPakCodec.ReadEntryBytes(pakPath, uexpEntry, info.Version, info.CompressionMethods, cancellation)
+                    : null;
+                if (UnrealStringTableFormat.ExtractPair(uaBytes, uexpBytes).Count > 0)
+                    matched.Add((ua, uexpEntry));
+            }
+            catch { }
+        }
+        return matched;
     }
 }

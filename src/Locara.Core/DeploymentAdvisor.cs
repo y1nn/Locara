@@ -68,7 +68,15 @@ public static class DeploymentAdvisor
         // 4. Godot PCK v2/v3 & binary .translation note
         if (capability.Engine == "godot")
         {
-            notes.Add("يعرض Godot 4 العربية بترميز UTF-8 المنطقي أصلياً؛ تُبنى حزم PCK v2/v3 وملفات .translation الثنائية مع الحفاظ على جداول التجزئة.");
+            notes.Add("يعرض Godot 4 العربية بترميز UTF-8 المنطقي أصلياً؛ تُبنى حزم PCK v2/v3 وملفات .translation الثنائية (RSRC/RSCC) مع الحفاظ على جداول التجزئة.");
+        }
+
+        // 4b. GameMaker compiled vs external localization note
+        if (capability.Engine == "gamemaker")
+        {
+            notes.Add(activeUnits == 0
+                ? "هذه لعبة GameMaker وتخزّن نصوصها داخل حزمة data.win المجمّعة (مقطع STRG) دون ملفات ترجمة خارجية مفتوحة؛ إذا وفّرت اللعبة مجلد لغات خارجي (JSON/CSV/INI/PO) اختره أو فعّل ملفاته من تبويب «الملفات»."
+                : "لعبة GameMaker بملفات ترجمة خارجية — تُبنى الملفات بترميز UTF-8 مع نسخ احتياطي واستعادة بضغطة زر.");
         }
 
         // 5. Mixed / manual override caution
@@ -80,7 +88,7 @@ public static class DeploymentAdvisor
 
         string strategy = (capability.Engine, activeFormats) switch
         {
-            (_, var fmts) when fmts.Contains("unreal-pak") || fmts.Contains("unreal-locres") => "unreal-pak-patch",
+            (_, var fmts) when fmts.Contains("unreal-pak") || fmts.Contains("unreal-locres") || fmts.Contains("unreal-stringtable") => "unreal-pak-patch",
             (_, var fmts) when fmts.Contains("unity-i2") => "unity-i2-tmp",
             (_, var fmts) when fmts.Contains("unity-bundle") => "unity-addressables-tmp",
             (_, var fmts) when hasGettextPotOnly => "gettext-pot-to-po",
@@ -88,6 +96,7 @@ public static class DeploymentAdvisor
             (_, var fmts) when fmts.Contains("godot-translation") => "godot-binary-translation",
             ("unity", _) when suggestXUnity => "unity-xunity-overlay",
             ("godot", _) => "godot-pck-or-loose",
+            ("gamemaker", _) => activeUnits == 0 ? "gamemaker-compiled-datawin" : "gamemaker-external-files",
             ("rpgmaker", _) => "rpgmaker-data-json",
             ("renpy", _) => "renpy-tl-arabic",
             _ => "standard-in-place"

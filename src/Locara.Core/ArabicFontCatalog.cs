@@ -94,6 +94,24 @@ public static class ArabicFontCatalog
         return BuiltInFonts[0];
     }
 
+    public static ArabicFontChoice ResolveContrastVariant(ArabicFontChoice? preferred)
+    {
+        var baseChoice = preferred ?? BuiltInFonts[0];
+        string? upgradedId = baseChoice.Id.ToLowerInvariant() switch
+        {
+            "builtin:noto-sans-regular" => "builtin:noto-sans-bold",
+            "builtin:ibm-plex-medium" => "builtin:ibm-plex-bold",
+            "builtin:amiri-regular" => "builtin:amiri-bold",
+            "system:segoeui.ttf" => "system:segoeuib.ttf",
+            "system:tahoma.ttf" => "system:tahomabd.ttf",
+            "system:majalla.ttf" => "system:majallab.ttf",
+            _ => null
+        };
+        if (upgradedId == null) return baseChoice;
+        var match = All().FirstOrDefault(f => f.Id.Equals(upgradedId, StringComparison.OrdinalIgnoreCase));
+        return match ?? baseChoice;
+    }
+
     public static byte[] LoadBytes(ArabicFontChoice choice)
     {
         byte[] bytes;
