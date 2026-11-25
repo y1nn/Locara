@@ -19,9 +19,9 @@ public sealed record TeamPlan(string Id, string Scope, string Package, string En
         && Batches.Select(batch => batch.Section).Distinct(StringComparer.Ordinal).Skip(1).Any();
 }
 public sealed record TeamRequest(string Role, string Model, string Instructions, string Data,
-    int WorkerId = 0, string Profile = "")
+    int WorkerId = 0, string Profile = "", IReadOnlyList<ChatTurn>? History = null)
 {
-    public int InputCharacters => Instructions.Length + Data.Length;
+    public int InputCharacters => Instructions.Length + Data.Length + (History?.Sum(t => t.Content.Length) ?? 0);
 }
 public sealed record TeamNote(string Id, string Source, string Draft, string Suggestion, string Issue);
 public sealed record AgentActivity(int WorkerId, string Role, string Stage, string Section,
@@ -416,7 +416,7 @@ public sealed class TranslationTeam(ProjectStore store)
             {
                 var route = ResolveRoute(plan.Settings, options, profileMap, request.WorkerId, request.Role);
                 return new ApiProvider(route.Options with { Model = request.Model }, plan.Engine)
-                    .RequestStructuredWithUsage(request.Instructions, request.Data, token);
+                    .RequestChatWithUsage(request.Instructions, request.History, request.Data, token);
             };
 
         var telemetry = new RunTelemetry(Summary(plan));
