@@ -98,7 +98,7 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
         }
     }
 
-    internal static IReadOnlyList<TextSlot> ExtractFromFile(string filePath)
+    internal static IReadOnlyList<TextSlot> ExtractFromFile(string filePath, Action<Diagnostic>? onDiagnostic = null)
     {
         string file = Path.GetFileName(filePath);
         var slots = new List<TextSlot>();
@@ -109,14 +109,14 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
                 if (!IsCandidateNodeName(nodeName)) continue;
                 byte[]? nodeBytes = UnityFsStream.TryReadNode(filePath, nodeName);
                 if (nodeBytes != null)
-                    ExtractFromSerializedBytes(nodeName, nodeBytes, slots);
+                    ExtractFromSerializedBytes(nodeName, nodeBytes, slots, onDiagnostic);
             }
             return slots;
         }
 
         var info = new FileInfo(filePath);
         if (!info.Exists || info.Length > 128L * 1024 * 1024) return [];
-        ExtractFromSerializedBytes("self", File.ReadAllBytes(filePath), slots);
+        ExtractFromSerializedBytes("self", File.ReadAllBytes(filePath), slots, onDiagnostic);
         return slots;
     }
 
@@ -137,7 +137,7 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
             }
             if (nodesToPatch.Count == 0) return;
 
-            bool anyArabicInFile = translations.Values.Any(StarTruckerDisplay.HasArabic);
+            bool anyArabicInFile = translations.Values.Any(ArabicTextEngine.HasArabic);
             if (anyArabicInFile && !nodesToPatch.Contains("resources.assets")
                 && UnityFsStream.ListSerializedNodeNames(sourceFilePath)
                     .Any(n => n.Equals("resources.assets", StringComparison.OrdinalIgnoreCase)))
@@ -197,7 +197,8 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
         nodeName.Equals("resources.assets", StringComparison.OrdinalIgnoreCase)
         || SharedAssetsNamePattern().IsMatch(nodeName);
 
-    private static void ExtractFromSerializedBytes(string nodeName, byte[] serializedBytes, List<TextSlot> slots)
+    private static void ExtractFromSerializedBytes(string nodeName, byte[] serializedBytes, List<TextSlot> slots,
+        Action<Diagnostic>? onDiagnostic = null)
     {
         var sf = UnitySerializedFile.TryRead(serializedBytes);
         if (sf == null) return;
@@ -209,7 +210,7 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
             var ta = UnityBundleFormat.ParseTextAsset(sf.Slice(obj));
             if (ta == null || !IsCandidateTextAsset(ta.Name, ta.Text)) continue;
 
-            var (kind, innerSlots) = ExtractEmbeddedSlots(ta.Name, ta.Text);
+            var (kind, innerSlots) = ExtractEmbeddedSlots(ta.Name, ta.Text, onDiagnostic);
             if (innerSlots == null || innerSlots.Count == 0) continue;
 
             // Apply Layer 1 TextQualityClassifier per TextAsset so shader/code/config JSONs are automatically filtered out!
@@ -243,7 +244,7 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
             if (!TryParseLocator(locator, out string locNode, out long pathId, out string kind, out string innerLocator))
                 continue;
             if (!locNode.Equals(nodeName, StringComparison.OrdinalIgnoreCase)) continue;
-            if (StarTruckerDisplay.HasArabic(target)) anyArabic = true;
+            if (ArabicTextEngine.HasArabic(target)) anyArabic = true;
             if (!grouped.TryGetValue(pathId, out var entry))
             {
                 entry = (kind, new Dictionary<string, string>(StringComparer.Ordinal));
@@ -257,7 +258,7 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
         var opts = displayOptions ?? UnityArabicDisplayOptions.Default;
         var replacements = new Dictionary<long, byte[]>();
         if (anyArabic || allowTmpOnly)
-            arabicFontPatched = UnityTmpArabicPatcher.TryPatch(sf, fontChoice, replacements, opts.FontScale);
+            arabicFontPatched = UnityTmpArabicPatcher.TryPatch(sf, fontChoice, replacements, opts.FontScale, opts.ContrastBoost);
 
         bool shouldShape = (arabicFontPatched || applyShaping) && opts.ShapeArabic;
         bool anyTextChanged = false;
@@ -289,7 +290,8 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
         return sf.Rewrite(replacements);
     }
 
-    private static (string Kind, IReadOnlyList<TextSlot>? Slots) ExtractEmbeddedSlots(string name, string text)
+    private static (string Kind, IReadOnlyList<TextSlot>? Slots) ExtractEmbeddedSlots(string name, string text,
+        Action<Diagnostic>? onDiagnostic = null)
     {
         string trimmed = text.TrimStart('\uFEFF', ' ', '\t', '\r', '\n');
         byte[] utf8 = Encoding.UTF8.GetBytes(text);
@@ -302,7 +304,7 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
                 var slots = Json.Extract(utf8);
                 if (slots.Count > 0) return ("json", slots);
             }
-            catch { }
+            catch (Exception ex) { onDiagnostic?.Invoke(new($"TextAsset:{name}", ex.Message)); }
         }
 
         // 2. XML
@@ -313,7 +315,7 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
                 var slots = Xml.Extract(utf8);
                 if (slots.Count > 0) return ("xml", slots);
             }
-            catch { }
+            catch (Exception ex) { onDiagnostic?.Invoke(new($"TextAsset:{name}", ex.Message)); }
         }
 
         // 3. PO / Gettext
@@ -324,7 +326,7 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
                 var slots = Po.Extract(utf8);
                 if (slots.Count > 0) return ("po", slots);
             }
-            catch { }
+            catch (Exception ex) { onDiagnostic?.Invoke(new($"TextAsset:{name}", ex.Message)); }
         }
 
         // 4. TSV / CSV (multi-line tabular with recognizable source column header)
@@ -338,7 +340,7 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
                     var slots = Tsv.Extract(utf8);
                     if (slots.Count > 0) return ("tsv", slots);
                 }
-                catch { }
+                catch (Exception ex) { onDiagnostic?.Invoke(new($"TextAsset:{name}", ex.Message)); }
             }
             if (firstLine.Contains(','))
             {
@@ -347,7 +349,7 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
                     var slots = Csv.Extract(utf8);
                     if (slots.Count > 0) return ("csv", slots);
                 }
-                catch { }
+                catch (Exception ex) { onDiagnostic?.Invoke(new($"TextAsset:{name}", ex.Message)); }
             }
         }
 
@@ -359,7 +361,7 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
                 var slots = Ini.Extract(utf8);
                 if (slots.Count >= 2) return ("ini", slots);
             }
-            catch { }
+            catch (Exception ex) { onDiagnostic?.Invoke(new($"TextAsset:{name}", ex.Message)); }
         }
 
         // 6. YAML (multi-line key: value mappings)
@@ -370,7 +372,7 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
                 var slots = Yaml.Extract(utf8);
                 if (slots.Count >= 2) return ("yaml", slots);
             }
-            catch { }
+            catch (Exception ex) { onDiagnostic?.Invoke(new($"TextAsset:{name}", ex.Message)); }
         }
 
         // 7. Plain human-readable TXT (e.g. story letter, dialogue script, book page)

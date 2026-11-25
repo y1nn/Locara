@@ -156,9 +156,9 @@ public static class PackageInstaller
         if (plan.ChangedFiles.Count == 0)
             throw new InvalidOperationException("لا توجد ترجمات معتمدة أو تغييرات مؤهلة للتثبيت.");
 
-        var build = service.Build(outputDirectory, final, password, cancellation, plan);
+        var build = service.Build(outputDirectory, final, password, cancellation, plan, overlayOnly: true);
         project.LastOutput = build.Directory;
-        string engine = project.Get("scanned_engine");
+        string engine = new ProjectSettings(project).ScannedEngine;
         string summary = plan.Notice.Length > 0
             ? plan.Notice
             : $"{build.Translations} نص مترجم";
@@ -295,13 +295,20 @@ public static class PackageInstaller
             if (item.Change.OriginalHash.Length == 0) continue;
             string path = Resolve(backup, item.Change.Path);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            if (journal == null && receiptOverride == null) File.Copy(item.Target, path);
-            else
+            try
             {
-                using var input = File.OpenRead(item.Target);
-                using var output = File.Open(path, FileMode.Create, FileAccess.Write, FileShare.None);
-                Containers.Copy(input, output, input.Length, cancellation);
-                output.Flush(flushToDisk: true);
+                if (journal == null && receiptOverride == null) File.Copy(item.Target, path);
+                else
+                {
+                    using var input = File.OpenRead(item.Target);
+                    using var output = File.Open(path, FileMode.Create, FileAccess.Write, FileShare.None);
+                    Containers.Copy(input, output, input.Length, cancellation);
+                    output.Flush(flushToDisk: true);
+                }
+            }
+            catch (IOException error) when (IsSharingViolation(error))
+            {
+                throw new IOException("الملف قيد الاستخدام من برنامج آخر أو من اللعبة. أغلق اللعبة وأي نافذة تستخدم الملف ثم أعد المحاولة — " + item.Target, error);
             }
             Verify(path, item.Change.OriginalHash, cancellation);
         }
@@ -417,9 +424,16 @@ public static class PackageInstaller
             {
                 cancellation.ThrowIfCancellationRequested();
                 Directory.CreateDirectory(Path.GetDirectoryName(file.Rollback)!);
-                using (var input = File.OpenRead(file.Target))
-                using (var output = new FileStream(file.Rollback, FileMode.CreateNew, FileAccess.Write))
+                try
+                {
+                    using var input = File.OpenRead(file.Target);
+                    using var output = new FileStream(file.Rollback, FileMode.CreateNew, FileAccess.Write);
                     Containers.Copy(input, output, input.Length, cancellation);
+                }
+                catch (IOException error) when (IsSharingViolation(error))
+                {
+                    throw new IOException("الملف قيد الاستخدام من برنامج آخر أو من اللعبة. أغلق اللعبة وأي نافذة تستخدم الملف ثم أعد المحاولة — " + file.Target, error);
+                }
                 Verify(file.Rollback, file.Before, cancellation);
             }
             try { Apply(pending, cancellation); }
@@ -469,13 +483,32 @@ public static class PackageInstaller
         }
     }
 
+    private static bool IsSharingViolation(IOException error) =>
+        (error.HResult & 0xFFFF) is 32 or 33;
+
+    private static void ClearReadOnlyIfPresent(string path)
+    {
+        if (!File.Exists(path)) return;
+        var attrs = File.GetAttributes(path);
+        if ((attrs & FileAttributes.ReadOnly) != 0)
+            File.SetAttributes(path, attrs & ~FileAttributes.ReadOnly);
+    }
+
     private static void Replace(string target, string replacement, string before, string after)
     {
         if (after.Length == 0)
         {
             if (!File.Exists(target)) return;
             Verify(target, before);
-            File.Delete(target);
+            try
+            {
+                ClearReadOnlyIfPresent(target);
+                File.Delete(target);
+            }
+            catch (IOException error) when (IsSharingViolation(error))
+            {
+                throw new IOException("الملف قيد الاستخدام من برنامج آخر أو من اللعبة. أغلق اللعبة وأي نافذة تستخدم الملف ثم أعد المحاولة — " + target, error);
+            }
             string? parent = Path.GetDirectoryName(target);
             if (!string.IsNullOrEmpty(parent)
                 && Path.GetFileName(parent).Equals("~mods", StringComparison.OrdinalIgnoreCase)
@@ -495,6 +528,7 @@ public static class PackageInstaller
         try
         {
             File.Copy(replacement, temporary);
+            ClearReadOnlyIfPresent(temporary);
             Verify(temporary, after);
             if (before.Length == 0)
             {
@@ -505,8 +539,13 @@ public static class PackageInstaller
             else
             {
                 Verify(target, before);
+                ClearReadOnlyIfPresent(target);
                 File.Replace(temporary, target, null);
             }
+        }
+        catch (IOException error) when (IsSharingViolation(error))
+        {
+            throw new IOException("الملف قيد الاستخدام من برنامج آخر أو من اللعبة. أغلق اللعبة وأي نافذة تستخدم الملف ثم أعد المحاولة — " + target, error);
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
@@ -520,10 +559,17 @@ public static class PackageInstaller
 
     internal static string FileHash(string path, CancellationToken cancellation = default)
     {
-        using var stream = File.OpenRead(path);
-        using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
-        Containers.Copy(stream, Stream.Null, stream.Length, cancellation, checksum: hash);
-        return Convert.ToHexString(hash.GetHashAndReset());
+        try
+        {
+            using var stream = File.OpenRead(path);
+            using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+            Containers.Copy(stream, Stream.Null, stream.Length, cancellation, checksum: hash);
+            return Convert.ToHexString(hash.GetHashAndReset());
+        }
+        catch (IOException error) when (IsSharingViolation(error))
+        {
+            throw new IOException("الملف قيد الاستخدام من برنامج آخر أو من اللعبة. أغلق اللعبة وأي نافذة تستخدم الملف ثم أعد المحاولة — " + path, error);
+        }
     }
 
     private static void Verify(string path, string expected, CancellationToken cancellation = default)

@@ -158,6 +158,11 @@ public partial class MainWindow
         AgentsGrid.ItemsSource = liveAgents;
         ActivityLog.ItemsSource = liveEvents;
         WorkerRoutingList.ItemsSource = workerRoutingRows;
+        if (PromptPresetSelector != null)
+        {
+            PromptPresetSelector.ItemsSource = ArabicPromptPresets.All;
+            PromptPresetSelector.SelectedIndex = 0;
+        }
         RefreshRoutingOptions();
     }
 
@@ -460,6 +465,27 @@ public partial class MainWindow
         Status.Text = "أُعيدت قوالب الأدوار الافتراضية. اضغط «حفظ إعدادات الأدوار» لتثبيتها.";
     }
 
+    private void ApplySelectedPromptPreset(object sender, RoutedEventArgs e)
+    {
+        if (PromptPresetSelector?.SelectedItem is not ArabicPromptPreset preset) return;
+        TeamStyleInput.Text = preset.Style;
+        SupervisorPromptInput.Text = preset.Supervisor;
+        TranslatorPromptInput.Text = preset.Translator;
+        ReviewerPromptInput.Text = preset.Reviewer;
+        if (projectPath != null)
+        {
+            try
+            {
+                using var project = new ProjectStore(projectPath);
+                new TranslationTeam(project).Settings = ReadInlineTeamSettings(reviewDrafts: false);
+                Status.Text = $"طُبّق وحُفظ قالب التوجيهات «{preset.Name}» لهذا المشروع.";
+                return;
+            }
+            catch (Exception error) { Status.Text = error.Message; return; }
+        }
+        Status.Text = $"طُبّق قالب «{preset.Name}» في حقول التوجيهات.";
+    }
+
     private void PreviewTeamPrompts(object sender, RoutedEventArgs e)
     {
         var settings = ReadInlineTeamSettings(reviewDrafts: false);
@@ -488,7 +514,9 @@ public partial class MainWindow
         catch (Exception error) { if (path == projectPath) Status.Text = error.Message; }
     }
 
-    private async void ReviewDraftsWithAi(object sender, RoutedEventArgs e)
+    private async void ReviewDraftsWithAi(object sender, RoutedEventArgs e) => await ReviewDraftsWithAiCore();
+
+    private async Task ReviewDraftsWithAiCore()
     {
         TranslationMode.SelectedValue = "review-drafts";
         SpeedMode.SelectedValue = "team";
@@ -562,7 +590,9 @@ public partial class MainWindow
             overrideWorkers: settings.Workers, overrideFastMode: settings.FastMode, overrideSettings: settings);
     }
 
-    private async void ResumeTeamQuick(object sender, RoutedEventArgs e)
+    private async void ResumeTeamQuick(object sender, RoutedEventArgs e) => await ResumeTeamQuickCore();
+
+    private async Task ResumeTeamQuickCore()
     {
         if (projectPath is not { } path || work != null || !SaveEdits()) return;
         ProviderOptions options;
@@ -590,7 +620,7 @@ public partial class MainWindow
     }
 
     private async void StartTeam(object sender, RoutedEventArgs e) => await StartUnifiedTranslationCore();
-    private async void ResumeTeam(object sender, RoutedEventArgs e) => ResumeTeamQuick(sender, e);
+    private async void ResumeTeam(object sender, RoutedEventArgs e) => await ResumeTeamQuickCore();
 
     private void PrepareLiveAgentsGrid(TeamPlan plan, ProviderOptions options, IReadOnlyDictionary<string, ProviderOptions> profiles,
         TeamSettings activeSettings, int workers, bool fastMode)
@@ -683,6 +713,7 @@ public partial class MainWindow
             UpdateLiveTelemetry(value, workers, clock.Elapsed, initialSaved, initialCompleted);
         });
 
+        bool finishedNormally = false;
         await Run(async cancellation =>
         {
             var result = await Task.Run(async () =>
@@ -708,6 +739,7 @@ public partial class MainWindow
                 return (status, output, notes: team.Notes(plan).Count);
             }, cancellation);
 
+            finishedNormally = true;
             LiveMonitorTitle.Text = result.status.Completed >= result.status.Total
                 ? "اكتمل التشغيل بنجاح"
                 : "توقّف التشغيل مع حفظ جميع الدفعات المكتملة";
@@ -724,6 +756,17 @@ public partial class MainWindow
                 BuildLog.Text = "معاينة الفريق جاهزة\n" + result.output;
             }
         }, keepTranslationInteractive: true);
+
+        if (!finishedNormally && IsLoaded && projectPath == path)
+        {
+            LiveMonitorTitle.Text = "توقّف التشغيل مع حفظ جميع الدفعات المكتملة";
+            LiveActiveAgentsText.Text = $"0 / {workers}";
+            foreach (var agent in liveAgents)
+            {
+                if (agent.Stage is not ("انتهى" or "مكتمل"))
+                    agent.Stage = "متوقف";
+            }
+        }
     }
 
     private void UpdateLiveTelemetry(TeamProgress value, int workers, TimeSpan elapsed, int initialSaved, int initialCompleted)
@@ -895,7 +938,8 @@ public partial class MainWindow
         using var project = new ProjectStore(path);
         var team = new TranslationTeam(project);
         var plan = team.Latest ?? throw new InvalidOperationException("لا يوجد تشغيل فريق محفوظ لهذا المصدر.");
-        if (plan.Package != project.Get("scanned_package") || plan.Engine != project.Get("scanned_engine"))
+        var projSettings = new ProjectSettings(project);
+        if (plan.Package != projSettings.ScannedPackage || plan.Engine != projSettings.ScannedEngine)
             throw new InvalidOperationException("اختر الحزمة التي تخص تشغيل الفريق.");
         return read(team, plan);
     }

@@ -161,29 +161,34 @@ public sealed class SmartDiscoveryTests
     }
 
     [Theory]
+    [InlineData(0u)] // FastLZ
     [InlineData(1u)] // Zlib / Deflate
+    [InlineData(2u)] // Zstd (Godot 4 default)
     [InlineData(3u)] // Gzip
     public void GodotTranslationFormatReadsAndRewritesCompressedRsccResources(uint compressionMode)
     {
-        byte[] rawRsrc = BuildPlainGodotTranslationRsrc("en", ["PLAY", "Play Game", "QUIT", "Quit"]);
+        byte[] rawRsrc = BuildPlainGodotTranslationRsrc("en", [
+            "PLAY", "Play Game — Adventure Awaits in the Citadel! Adventure Awaits in the Citadel!",
+            "QUIT", "Quit to Desktop"
+        ]);
         byte[] rscc = CompressToGodotRscc(rawRsrc, compressionMode, blockSize: 128);
 
         var format = GodotTranslationFormat.Instance;
         var slots = format.Extract(rscc);
         Assert.Equal(2, slots.Count);
-        Assert.Equal("Play Game", slots.Single(s => s.Locator == "msg:0").Source);
-        Assert.Equal("Quit", slots.Single(s => s.Locator == "msg:1").Source);
+        Assert.Equal("Play Game — Adventure Awaits in the Citadel! Adventure Awaits in the Citadel!", slots.Single(s => s.Locator == "msg:0").Source);
+        Assert.Equal("Quit to Desktop", slots.Single(s => s.Locator == "msg:1").Source);
 
         byte[] rewritten = format.Apply(rscc, new Dictionary<string, string>
         {
-            ["msg:0"] = "ابدأ اللعب",
-            ["msg:1"] = "خروج"
+            ["msg:0"] = "ابدأ اللعب — المغامرة بانتظارك في القلعة!",
+            ["msg:1"] = "الخروج إلى سطح المكتب"
         });
         Assert.True(rewritten.AsSpan(0, 4).SequenceEqual("RSRC"u8));
 
         var reExtracted = format.Extract(rewritten);
-        Assert.Equal("ابدأ اللعب", reExtracted.Single(s => s.Locator == "msg:0").Source);
-        Assert.Equal("خروج", reExtracted.Single(s => s.Locator == "msg:1").Source);
+        Assert.Equal("ابدأ اللعب — المغامرة بانتظارك في القلعة!", reExtracted.Single(s => s.Locator == "msg:0").Source);
+        Assert.Equal("الخروج إلى سطح المكتب", reExtracted.Single(s => s.Locator == "msg:1").Source);
     }
 
     [Fact]
@@ -476,14 +481,27 @@ public sealed class SmartDiscoveryTests
         {
             int start = (int)(i * blockSize);
             int len = Math.Min((int)blockSize, body.Length - start);
-            using var compMs = new MemoryStream();
-            using (Stream comp = mode == 3u
-                ? new GZipStream(compMs, CompressionLevel.Fastest, leaveOpen: true)
-                : new ZLibStream(compMs, CompressionLevel.Fastest, leaveOpen: true))
+            ReadOnlySpan<byte> slice = body.AsSpan(start, len);
+            if (mode == 2u)
             {
-                comp.Write(body, start, len);
+                using var zstd = new ZstdSharp.Compressor();
+                chunks.Add(zstd.Wrap(slice).ToArray());
             }
-            chunks.Add(compMs.ToArray());
+            else if (mode == 0u)
+            {
+                chunks.Add(CompressFastLzLevel1ForTest(slice));
+            }
+            else
+            {
+                using var compMs = new MemoryStream();
+                using (Stream comp = mode == 3u
+                    ? new GZipStream(compMs, CompressionLevel.Fastest, leaveOpen: true)
+                    : new ZLibStream(compMs, CompressionLevel.Fastest, leaveOpen: true))
+                {
+                    comp.Write(slice);
+                }
+                chunks.Add(compMs.ToArray());
+            }
         }
 
         using var outMs = new MemoryStream();
@@ -495,5 +513,76 @@ public sealed class SmartDiscoveryTests
         foreach (var c in chunks) w.Write((uint)c.Length);
         foreach (var c in chunks) w.Write(c);
         return outMs.ToArray();
+    }
+
+    private static byte[] CompressFastLzLevel1ForTest(ReadOnlySpan<byte> input)
+    {
+        // Minimal FastLZ Level 1 encoder that emits both literal runs and LZ back-references
+        using var ms = new MemoryStream();
+        int pos = 0;
+        var lit = new List<byte>();
+
+        void FlushLiterals()
+        {
+            int idx = 0;
+            while (idx < lit.Count)
+            {
+                int take = Math.Min(32, lit.Count - idx);
+                ms.WriteByte((byte)(take - 1)); // ctrl 0..31 => literal run of (ctrl + 1)
+                for (int k = 0; k < take; k++) ms.WriteByte(lit[idx + k]);
+                idx += take;
+            }
+            lit.Clear();
+        }
+
+        // First instruction in FastLZ Level 1 must be a literal run (upper 3 bits == 0)
+        if (input.Length > 0)
+        {
+            lit.Add(input[0]);
+            pos = 1;
+        }
+
+        while (pos < input.Length)
+        {
+            int bestLen = 0;
+            int bestDist = 0;
+            int searchStart = Math.Max(0, pos - 8192);
+            for (int refPos = searchStart; refPos < pos; refPos++)
+            {
+                int matchLen = 0;
+                while (pos + matchLen < input.Length && matchLen < 264 && input[refPos + matchLen] == input[pos + matchLen])
+                    matchLen++;
+                if (matchLen >= 3 && matchLen > bestLen)
+                {
+                    bestLen = matchLen;
+                    bestDist = pos - refPos - 1;
+                }
+            }
+
+            if (bestLen >= 3)
+            {
+                FlushLiterals();
+                int lenCode = bestLen - 2; // 1..6 short, >=7 extended
+                int ofsHigh = (bestDist >> 8) & 31;
+                int ofsLow = bestDist & 0xFF;
+                if (lenCode < 7)
+                {
+                    ms.WriteByte((byte)((lenCode << 5) | ofsHigh));
+                }
+                else
+                {
+                    ms.WriteByte((byte)((7 << 5) | ofsHigh));
+                    ms.WriteByte((byte)(lenCode - 7));
+                }
+                ms.WriteByte((byte)ofsLow);
+                pos += bestLen;
+            }
+            else
+            {
+                lit.Add(input[pos++]);
+            }
+        }
+        FlushLiterals();
+        return ms.ToArray();
     }
 }

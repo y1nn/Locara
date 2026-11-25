@@ -125,7 +125,7 @@ public sealed class ProjectStore : IDisposable
         try
         {
             connection.Open();
-            Execute($"PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout={Math.Min(commandTimeout, 5) * 1000};");
+            Execute($"PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout={Math.Min(commandTimeout, 15) * 1000};");
             if (SchemaVersion() != 5) Upgrade();
         }
         catch { connection.Dispose(); throw; }

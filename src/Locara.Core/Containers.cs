@@ -152,14 +152,24 @@ public sealed class FolderContainer : ContainerAdapter
         }
     }
 
+    internal static bool IsSharingViolation(IOException error) =>
+        (error.HResult & 0xFFFF) is 32 or 33;
+
     private static void AddFile(ResourceIndex index, string path, string file)
     {
         long size = new FileInfo(file).Length;
         index.Add(path, size, (output, cancellation) =>
         {
             Identity.RequireNoLinks(file);
-            using var input = File.OpenRead(file);
-            Containers.Copy(input, output, size, cancellation);
+            try
+            {
+                using var input = File.OpenRead(file);
+                Containers.Copy(input, output, size, cancellation);
+            }
+            catch (IOException error) when (IsSharingViolation(error))
+            {
+                throw new IOException("الملف قيد الاستخدام من برنامج آخر أو من اللعبة. أغلق اللعبة وأي نافذة تستخدم الملف ثم أعد المحاولة — " + file, error);
+            }
         });
     }
 

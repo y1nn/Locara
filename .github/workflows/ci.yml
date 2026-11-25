@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, dev ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, dev ]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build, Privacy Guard & Test (Windows x64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Privacy and credential leak guard
+        run: |
+          $trackedLocal = git ls-files '.local/*'
+          if ($trackedLocal) {
+            throw "Tracked files found under .local/: $trackedLocal"
+          }
+          $leaks = git grep -n -I -E "(C:[/\\\\]Users|E:[/\\\\]test|E:[/\\\\]projects|D:[/\\\\]|/Users/|/home/|sk-ant-[A-Za-z0-9_-]{16,}|sk-[A-Za-z0-9]{16,}|AIza[0-9A-Za-z_-]{20,}|ghp_[A-Za-z0-9]{16,}|nfp_[A-Za-z0-9]{16,})" -- ':!.github/workflows/ci.yml'
+          if ($LASTEXITCODE -eq 0 -and $leaks) {
+            Write-Error "Potential local path or secret leak detected:`n$leaks"
+            exit 1
+          }
+          if ($LASTEXITCODE -gt 1) {
+            throw "git grep failed with exit code $LASTEXITCODE"
+          }
+          Write-Host "Privacy guard passed: 0 leaks in tracked files."
+          $global:LASTEXITCODE = 0
+          exit 0
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore NuGet packages (locked mode)
+        run: dotnet restore --locked-mode
+
+      - name: Build solution (Release, warnings as errors)
+        run: dotnet build -c Release --no-restore -p:TreatWarningsAsErrors=true
+
+      - name: Run xUnit test suite
+        run: dotnet test -c Release --no-build --verbosity normal
+
+      - name: Package Windows x64 release on version tags
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: powershell -ExecutionPolicy Bypass -File scripts/Publish-Windows.ps1
+
+      - name: Upload Windows x64 release artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: Locara-windows-x64
+          path: |
+            artifacts/release/*/Locara-windows-x64.zip
+            artifacts/release/*/Locara-windows-x64.zip.sha256
+          if-no-files-found: error

@@ -6,11 +6,11 @@ namespace Locara.Core;
 
 public static class Tokens
 {
-    private const string Common = @"\[(?:/?[a-z][a-z0-9_.:!=#-]*|[A-Z0-9_]{2,}(?:[=:#.-][^\s\]\r\n]+)?|\d+)\]|\{[^{}\r\n]+\}|%%|%(?:\([^)]+\))?[\d.$+-]*[sdif]|%[1-9]\d*|\\[A-Za-z]+(?:\[[^\]]*\])?|</?[A-Za-z][^>]*>";
+    private const string Common = @"\[(?:/?[a-z][a-z0-9_.:!=#-]*|[A-Z0-9_]{2,}(?:[=:#.-][^\s\]\r\n]+)?|\d+)\]|\{[^{}\r\n]+\}|%%|%(?:\([^)]+\))?[\d.$+#-]*(?:hh?|ll?|z)?[sdifuxXgeEc]|%[1-9]\d*|\\[A-Za-z]+(?:\[[^\]]*\])?|</?[A-Za-z][^>]*>";
     private static readonly Regex Standard = new(Common, RegexOptions.Compiled);
     private static readonly Regex RpgMaker = new(Common + @"|\\[.$|!><^{}\\]", RegexOptions.Compiled);
     private static readonly Regex PairedMarkup = new(
-        @"<(?<closing>/)?(?<name>b|i|u|s|color|size|font|link|em|strong|pc|mrk)(?=[\s=>/])[^>]*>",
+        @"<(?<closing>/)?(?<name>a|b|i|u|s|color|size|font|link|em|strong|pc|mrk|nobr|mark|style|align|alpha|cspace|sup|sub)(?=[\s=>/])[^>]*>",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static Regex Pattern(string engine) => engine == "rpgmaker" ? RpgMaker : Standard;
     public static List<string> Find(string text, string engine = "") =>
@@ -181,29 +181,91 @@ public sealed partial class ApiProvider : ITranslationProvider
         return result;
     }
 
+    internal static readonly JsonDocumentOptions LenientJson = new()
+    {
+        AllowTrailingCommas = true,
+        CommentHandling = JsonCommentHandling.Skip
+    };
+
+    private static readonly HashSet<string> WrapperKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "entries", "translations", "results", "items", "reviews", "data", "output"
+    };
+
     internal static Dictionary<string, string> ReadTranslations(string content, IEnumerable<string> ids,
         IReadOnlySet<string>? allowBlankIds = null)
+    {
+        var parsed = ReadTranslationsCore(content, ids, allowBlankIds, allowPartial: false, out _);
+        return parsed;
+    }
+
+    internal static Dictionary<string, string> ReadTranslationsPartial(string content, IEnumerable<string> ids,
+        out List<string> missingIds, IReadOnlySet<string>? allowBlankIds = null)
+    {
+        return ReadTranslationsCore(content, ids, allowBlankIds, allowPartial: true, out missingIds);
+    }
+
+    private static Dictionary<string, string> ReadTranslationsCore(string content, IEnumerable<string> ids,
+        IReadOnlySet<string>? allowBlankIds, bool allowPartial, out List<string> missingIds)
     {
         const string invalid = "أعاد النموذج دفعة بصيغة غير صالحة. يلزم نص ترجمة واحد لكل معرّف مطلوب. لم تُحفظ نتائج هذه الدفعة.";
         var remaining = ids.ToHashSet(StringComparer.Ordinal);
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        static string? ExtractTextFromValue(JsonElement value)
+        {
+            if (value.ValueKind == JsonValueKind.String) return value.GetString();
+            if (value.ValueKind != JsonValueKind.Object) return null;
+            foreach (string key in new[] { "translation", "target", "value", "ar", "arabic", "text" })
+            {
+                foreach (var prop in value.EnumerateObject())
+                {
+                    if (prop.Name.Equals(key, StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.String)
+                        return prop.Value.GetString();
+                }
+            }
+            return null;
+        }
+
+        static string? ReadIdElement(JsonElement el) => el.ValueKind switch
+        {
+            JsonValueKind.String => el.GetString(),
+            JsonValueKind.Number => el.GetRawText(),
+            _ => null
+        };
+
         void Add(string? id, JsonElement value)
         {
-            if (id == null || !remaining.Remove(id) || value.ValueKind != JsonValueKind.String)
-                throw new InvalidDataException(invalid);
-            string text = value.GetString()!;
+            if (id == null)
+            {
+                if (!allowPartial) throw new InvalidDataException(invalid);
+                return;
+            }
+            if (!remaining.Contains(id))
+            {
+                if (result.ContainsKey(id) || !allowPartial)
+                    throw new InvalidDataException(invalid);
+                return; // Ignore extra commentary/unexpected key in partial salvage mode
+            }
+            string? text = ExtractTextFromValue(value);
+            if (text == null)
+            {
+                if (!allowPartial) throw new InvalidDataException(invalid);
+                return;
+            }
             if (string.IsNullOrWhiteSpace(text) && allowBlankIds?.Contains(id) != true)
-                throw new InvalidDataException(invalid);
+            {
+                if (!allowPartial) throw new InvalidDataException(invalid);
+                return;
+            }
+            remaining.Remove(id);
             result.Add(id, text);
         }
 
         try
         {
-            using var document = JsonDocument.Parse(CleanJsonPayload(content));
-            var payload = document.RootElement;
-            if (payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("entries", out var wrapped)
-                && payload.EnumerateObject().Count() == 1 && wrapped.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
-                payload = wrapped;
+            using var document = JsonDocument.Parse(CleanJsonPayload(content), LenientJson);
+            var payload = UnwrapSingleContainer(document.RootElement);
 
             if (payload.ValueKind == JsonValueKind.Object)
             {
@@ -213,22 +275,61 @@ public sealed partial class ApiProvider : ITranslationProvider
             {
                 foreach (var entry in payload.EnumerateArray())
                 {
-                    if (entry.ValueKind != JsonValueKind.Object) throw new InvalidDataException(invalid);
+                    if (entry.ValueKind != JsonValueKind.Object)
+                    {
+                        if (!allowPartial) throw new InvalidDataException(invalid);
+                        continue;
+                    }
                     var fields = entry.EnumerateObject().ToArray();
-                    var identifiers = fields.Where(field => field.NameEquals("id")).ToArray();
-                    var targets = fields.Where(field => field.Name is "translation" or "target").ToArray();
-                    if (targets.Length == 0 && fields.Length == 2)
-                        targets = fields.Where(field => field.NameEquals("text")).ToArray();
-                    if (identifiers.Length != 1 || identifiers[0].Value.ValueKind != JsonValueKind.String || targets.Length != 1)
-                        throw new InvalidDataException(invalid);
-                    Add(identifiers[0].Value.GetString(), targets[0].Value);
+                    var identifiers = fields.Where(field => field.Name.Equals("id", StringComparison.OrdinalIgnoreCase)).ToArray();
+                    if (identifiers.Length != 1)
+                    {
+                        if (!allowPartial) throw new InvalidDataException(invalid);
+                        continue;
+                    }
+                    string? entryId = ReadIdElement(identifiers[0].Value);
+                    JsonProperty? targetProp = fields.Cast<JsonProperty?>().FirstOrDefault(f =>
+                        f!.Value.Name.Equals("translation", StringComparison.OrdinalIgnoreCase)
+                        || f.Value.Name.Equals("target", StringComparison.OrdinalIgnoreCase)
+                        || f.Value.Name.Equals("value", StringComparison.OrdinalIgnoreCase)
+                        || f.Value.Name.Equals("ar", StringComparison.OrdinalIgnoreCase)
+                        || f.Value.Name.Equals("arabic", StringComparison.OrdinalIgnoreCase));
+                    targetProp ??= fields.Cast<JsonProperty?>().FirstOrDefault(f =>
+                        f!.Value.Name.Equals("text", StringComparison.OrdinalIgnoreCase));
+                    if (entryId == null || targetProp == null)
+                    {
+                        if (!allowPartial) throw new InvalidDataException(invalid);
+                        continue;
+                    }
+                    Add(entryId, targetProp.Value.Value);
                 }
             }
             else throw new InvalidDataException(invalid);
         }
         catch (JsonException error) { throw new InvalidDataException(invalid, error); }
-        if (remaining.Count > 0) throw new InvalidDataException(invalid);
+
+        missingIds = remaining.ToList();
+        if (!allowPartial && remaining.Count > 0)
+            throw new InvalidDataException($"{invalid} (المفقود: {remaining.Count})");
+        if (allowPartial && result.Count == 0 && remaining.Count > 0)
+            throw new InvalidDataException(invalid);
         return result;
+    }
+
+    internal static JsonElement UnwrapSingleContainer(JsonElement payload)
+    {
+        for (int depth = 0; depth < 2 && payload.ValueKind == JsonValueKind.Object; depth++)
+        {
+            var props = payload.EnumerateObject().ToArray();
+            if (props.Length == 1 && WrapperKeys.Contains(props[0].Name)
+                && props[0].Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+            {
+                payload = props[0].Value;
+                continue;
+            }
+            break;
+        }
+        return payload;
     }
 
     internal async Task<string> RequestStructured(string instructions, string data, CancellationToken cancellation) =>
@@ -305,13 +406,25 @@ public sealed partial class ApiProvider : ITranslationProvider
 
     internal static string CleanJsonPayload(string text)
     {
-        string trimmed = Regex.Replace(text.Trim(), @"^```(?:json)?\s*|\s*```$", "").Trim();
-        if (trimmed.Length == 0) return trimmed;
-        if ((trimmed[0] == '{' && trimmed[^1] == '}') || (trimmed[0] == '[' && trimmed[^1] == ']'))
+        if (string.IsNullOrWhiteSpace(text)) return "";
+        // Strip <think>...</think> reasoning blocks emitted by reasoning models (DeepSeek-R1, Qwen, local OpenAI servers)
+        string stripped = Regex.Replace(text, @"<think\b[^>]*>[\s\S]*?</think>", "", RegexOptions.IgnoreCase).Trim();
+        if (stripped.Length == 0) stripped = text.Trim();
+
+        // Check fenced ```json ... ``` blocks anywhere inside prose (prefer last valid block)
+        var fenceMatches = Regex.Matches(stripped, @"```(?:json)?\s*([\s\S]*?)\s*```", RegexOptions.IgnoreCase);
+        for (int i = fenceMatches.Count - 1; i >= 0; i--)
         {
-            try { using var _ = JsonDocument.Parse(trimmed); return trimmed; }
-            catch (JsonException) { }
+            string fenced = fenceMatches[i].Groups[1].Value.Trim();
+            if (TryNormalizeJsonCandidate(fenced, out string normalized))
+                return normalized;
         }
+
+        string trimmed = Regex.Replace(stripped, @"^```(?:json)?\s*|\s*```$", "", RegexOptions.IgnoreCase).Trim();
+        if (trimmed.Length == 0) return trimmed;
+        if (TryNormalizeJsonCandidate(trimmed, out string direct))
+            return direct;
+
         int objStart = trimmed.IndexOf('{');
         int arrStart = trimmed.IndexOf('[');
         int start = (objStart, arrStart) switch
@@ -322,14 +435,18 @@ public sealed partial class ApiProvider : ITranslationProvider
             _ => -1
         };
         if (start < 0) return trimmed;
+
         char close = trimmed[start] == '{' ? '}' : ']';
         int end = trimmed.LastIndexOf(close);
         if (end > start)
         {
             string candidate = trimmed[start..(end + 1)];
-            try { using var _ = JsonDocument.Parse(candidate); return candidate; }
-            catch (JsonException) { }
+            if (TryNormalizeJsonCandidate(candidate, out string normalized))
+                return normalized;
+            if (TryMergeConcatenatedObjects(candidate, out string merged))
+                return merged;
         }
+
         int depth = 0;
         bool inString = false;
         bool escaped = false;
@@ -347,38 +464,256 @@ public sealed partial class ApiProvider : ITranslationProvider
             else if (ch is '}' or ']' && --depth == 0)
             {
                 string slice = trimmed[start..(index + 1)];
-                try { using var _ = JsonDocument.Parse(slice); return slice; }
-                catch (JsonException) { break; }
+                if (TryNormalizeJsonCandidate(slice, out string normalized))
+                    return normalized;
+                break;
             }
         }
         return trimmed;
     }
 
+    private static bool TryNormalizeJsonCandidate(string candidate, out string normalized)
+    {
+        normalized = candidate;
+        if (candidate.Length < 2 || !((candidate[0] == '{' && candidate[^1] == '}') || (candidate[0] == '[' && candidate[^1] == ']')))
+            return false;
+        if (IsValidJson(candidate, strict: true))
+        {
+            normalized = candidate;
+            return true;
+        }
+        if (IsValidJson(candidate, strict: false))
+        {
+            using var doc = JsonDocument.Parse(candidate, LenientJson);
+            normalized = doc.RootElement.GetRawText();
+            return true;
+        }
+        string repaired = TryRepairUnescapedJsonQuotes(candidate);
+        if (repaired != candidate && IsValidJson(repaired, strict: false))
+        {
+            using var doc = JsonDocument.Parse(repaired, LenientJson);
+            normalized = doc.RootElement.GetRawText();
+            return true;
+        }
+        return false;
+    }
+
+    private static bool IsValidJson(string text, bool strict)
+    {
+        try
+        {
+            using var _ = strict ? JsonDocument.Parse(text) : JsonDocument.Parse(text, LenientJson);
+            return true;
+        }
+        catch (JsonException) { return false; }
+    }
+
+    private static bool TryMergeConcatenatedObjects(string text, out string merged)
+    {
+        merged = "";
+        var objects = new List<string>();
+        int pos = 0;
+        while (pos < text.Length)
+        {
+            while (pos < text.Length && char.IsWhiteSpace(text[pos])) pos++;
+            if (pos >= text.Length) break;
+            if (text[pos] != '{') return false;
+            int start = pos;
+            int depth = 0;
+            bool inString = false;
+            bool escaped = false;
+            int foundEnd = -1;
+            for (int i = start; i < text.Length; i++)
+            {
+                char ch = text[i];
+                if (inString)
+                {
+                    if (escaped) escaped = false;
+                    else if (ch == '\\') escaped = true;
+                    else if (ch == '"') inString = false;
+                }
+                else if (ch == '"') inString = true;
+                else if (ch == '{') depth++;
+                else if (ch == '}' && --depth == 0)
+                {
+                    foundEnd = i;
+                    break;
+                }
+            }
+            if (foundEnd < 0) return false;
+            string slice = text[start..(foundEnd + 1)];
+            if (!TryNormalizeJsonCandidate(slice, out string normObj)) return false;
+            objects.Add(normObj);
+            pos = foundEnd + 1;
+        }
+        if (objects.Count < 2) return false;
+        using var ms = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(ms, new JsonWriterOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
+        {
+            writer.WriteStartObject();
+            foreach (string objText in objects)
+            {
+                using var doc = JsonDocument.Parse(objText, LenientJson);
+                if (doc.RootElement.ValueKind != JsonValueKind.Object) return false;
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                    prop.WriteTo(writer);
+            }
+            writer.WriteEndObject();
+        }
+        merged = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+        return true;
+    }
+
+    private static string TryRepairUnescapedJsonQuotes(string json)
+    {
+        var sb = new System.Text.StringBuilder(json.Length + 16);
+        bool inString = false;
+        bool escaped = false;
+
+        int NextNonWs(int index)
+        {
+            while (index < json.Length && char.IsWhiteSpace(json[index])) index++;
+            return index;
+        }
+
+        for (int i = 0; i < json.Length; i++)
+        {
+            char c = json[i];
+            if (!inString)
+            {
+                if (c == '"') inString = true;
+                sb.Append(c);
+                continue;
+            }
+            if (escaped)
+            {
+                escaped = false;
+                sb.Append(c);
+                continue;
+            }
+            if (c == '\\')
+            {
+                escaped = true;
+                sb.Append(c);
+                continue;
+            }
+            if (c == '"')
+            {
+                int nextIdx = NextNonWs(i + 1);
+                bool validTerminator = false;
+                if (nextIdx >= json.Length)
+                {
+                    validTerminator = true;
+                }
+                else
+                {
+                    char next = json[nextIdx];
+                    if (next is ':' or '}' or ']')
+                    {
+                        validTerminator = true;
+                    }
+                    else if (next == ',')
+                    {
+                        int afterComma = NextNonWs(nextIdx + 1);
+                        if (afterComma < json.Length && json[afterComma] is '"' or '{' or '[' or '}' or ']' or '-' or (>= '0' and <= '9') or 't' or 'f' or 'n')
+                            validTerminator = true;
+                    }
+                }
+                if (validTerminator)
+                {
+                    inString = false;
+                    sb.Append('"');
+                }
+                else
+                {
+                    sb.Append("\\\"");
+                }
+                continue;
+            }
+            sb.Append(c);
+        }
+        return sb.ToString();
+    }
+
     private static string? ExtractGeminiText(JsonElement response)
     {
-        string? fallback = null;
-        string? answer = null;
-        foreach (var part in response.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts").EnumerateArray())
+        if (!response.TryGetProperty("candidates", out var candidates) || candidates.ValueKind != JsonValueKind.Array || candidates.GetArrayLength() == 0)
+        {
+            string reason = response.TryGetProperty("promptFeedback", out var fb) && fb.ValueKind == JsonValueKind.Object
+                && fb.TryGetProperty("blockReason", out var br) && br.ValueKind == JsonValueKind.String
+                ? br.GetString() ?? "" : "";
+            throw new InvalidDataException(reason.Length > 0
+                ? $"حظر مزوّد Gemini الاستجابة ({reason})."
+                : "أعاد مزوّد Gemini استجابة بلا نتائج (candidates فارغة).");
+        }
+        var first = candidates[0];
+        string finishReason = first.TryGetProperty("finishReason", out var fr) && fr.ValueKind == JsonValueKind.String
+            ? fr.GetString() ?? "" : "";
+        if (!first.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Object
+            || !content.TryGetProperty("parts", out var parts) || parts.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidDataException(finishReason.Length > 0
+                ? $"أنهى مزوّد Gemini الاستجابة بدون نص ({finishReason})."
+                : "استجابة مزوّد Gemini لا تحتوي نصاً قابلاً للقراءة.");
+        }
+
+        var answer = new System.Text.StringBuilder();
+        var fallback = new System.Text.StringBuilder();
+        foreach (var part in parts.EnumerateArray())
         {
             if (!part.TryGetProperty("text", out var text) || text.ValueKind != JsonValueKind.String) continue;
             string? value = text.GetString();
-            fallback = value;
+            if (string.IsNullOrEmpty(value)) continue;
+            fallback.Append(value);
             bool isThought = part.TryGetProperty("thought", out var thought) && thought.ValueKind == JsonValueKind.True;
-            if (!isThought) answer = value;
+            if (!isThought) answer.Append(value);
         }
-        return answer ?? fallback;
+        if (answer.Length > 0) return answer.ToString();
+        if (fallback.Length > 0) return fallback.ToString();
+        if (finishReason.Length > 0)
+            throw new InvalidDataException($"أنهى مزوّد Gemini الاستجابة بنص فارغ ({finishReason}).");
+        return null;
     }
 
     private static string? ExtractAnthropicText(JsonElement response)
     {
-        string? answer = null;
-        foreach (var block in response.GetProperty("content").EnumerateArray())
+        if (!response.TryGetProperty("content", out var blocks) || blocks.ValueKind != JsonValueKind.Array)
+            throw new InvalidDataException("استجابة Anthropic لا تحتوي محتوى نصياً.");
+        var answer = new System.Text.StringBuilder();
+        foreach (var block in blocks.EnumerateArray())
         {
             if ((!block.TryGetProperty("type", out var type) || type.GetString() == "text")
                 && block.TryGetProperty("text", out var value) && value.ValueKind == JsonValueKind.String)
-                answer = value.GetString();
+                answer.Append(value.GetString());
         }
-        return answer;
+        if (answer.Length > 0) return answer.ToString();
+        string stopReason = response.TryGetProperty("stop_reason", out var sr) && sr.ValueKind == JsonValueKind.String
+            ? sr.GetString() ?? "" : "";
+        if (stopReason.Length > 0)
+            throw new InvalidDataException($"أنهى مزوّد Anthropic الاستجابة بدون نص ({stopReason}).");
+        return null;
+    }
+
+    private static string? ExtractOpenAiText(JsonElement response)
+    {
+        if (!response.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array || choices.GetArrayLength() == 0)
+            throw new InvalidDataException("أعاد المزوّد استجابة بلا اختيارات (choices فارغة).");
+        var first = choices[0];
+        string finishReason = first.TryGetProperty("finish_reason", out var fr) && fr.ValueKind == JsonValueKind.String
+            ? fr.GetString() ?? "" : "";
+        if (first.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.Object)
+        {
+            if (message.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.String)
+            {
+                string? value = content.GetString();
+                if (!string.IsNullOrWhiteSpace(value)) return value;
+            }
+            if (message.TryGetProperty("refusal", out var refusal) && refusal.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(refusal.GetString()))
+                throw new InvalidDataException($"رفض النموذج معالجة الدفعة ({refusal.GetString()}).");
+        }
+        if (finishReason.Length > 0)
+            throw new InvalidDataException($"أنهى النموذج الاستجابة بدون نص ({finishReason}).");
+        return null;
     }
 
     private string ExtractMessage(JsonElement response)
@@ -387,7 +722,7 @@ public sealed partial class ApiProvider : ITranslationProvider
         {
             "gemini" => ExtractGeminiText(response),
             "anthropic" => ExtractAnthropicText(response),
-            _ => response.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString()
+            _ => ExtractOpenAiText(response)
         };
         return CleanJsonPayload(text ?? throw new InvalidDataException("استجابة المزوّد فارغة."));
     }

@@ -8,7 +8,7 @@ if(args.Length==0||args[0] is "help" or "--help")
     Console.WriteLine("""
         Locara
         steam
-        create <project-folder> <source-folder-or-file> [auto|generic|godot|rpgmaker|renpy|unity|unreal]
+        create <project-folder> <source-folder-or-file> [auto|generic|godot|rpgmaker|renpy|unity|unreal|gamemaker]
         source <project-folder> <path> [--relocate]
         packages <project-folder>
         languages <project-folder>
@@ -18,7 +18,8 @@ if(args.Length==0||args[0] is "help" or "--help")
         inspect <project-folder> <resource>
         configure <project-folder> <resource> <rule-json-file|--auto>
         plan <project-folder> [--final]
-        scan <project-folder>
+        scan <project-folder> [--aes-key <hex-or-base64>]
+        aes-key <project-folder> <hex-or-base64|--clear>
         files <project-folder>
         clusters <project-folder>
         advice <project-folder>
@@ -86,7 +87,28 @@ try
                 ?? throw new ArgumentException("Invalid extraction rule."));
             break;
         case "plan": Console.WriteLine(JsonSerializer.Serialize(service.Preview(args.Contains("--final"), password, stop.Token))); break;
-        case "scan":Console.WriteLine(JsonSerializer.Serialize(service.Scan(password,stop.Token)));break;
+        case "aes-key":
+        {
+            if (args.Length != 3) throw new ArgumentException("aes-key <project-folder> <hex-or-base64|--clear>");
+            string rawKey = args[2] == "--clear" ? "" : args[2].Trim();
+            if (rawKey.Length > 0 && !ProjectSettings.IsValidUnrealAesKey(rawKey))
+                throw new ArgumentException("Invalid AES-256 key. Provide 64 hex chars (0x...) or 32-byte Base64.");
+            new ProjectSettings(project).UnrealAesKey = rawKey;
+            Console.WriteLine(rawKey.Length == 0 ? "Unreal AES key cleared." : "Unreal AES key saved.");
+            break;
+        }
+        case "scan":
+        {
+            int aesIdx = Array.IndexOf(args, "--aes-key");
+            if (aesIdx >= 0)
+            {
+                if (aesIdx + 1 >= args.Length || !ProjectSettings.IsValidUnrealAesKey(args[aesIdx + 1]))
+                    throw new ArgumentException("Invalid --aes-key value. Provide 64 hex chars (0x...) or 32-byte Base64.");
+                new ProjectSettings(project).UnrealAesKey = args[aesIdx + 1];
+            }
+            Console.WriteLine(JsonSerializer.Serialize(service.Scan(password, stop.Token)));
+            break;
+        }
         case "files":
             var fileOpts = new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter<FileQualityVerdict>() } };
             Console.WriteLine(JsonSerializer.Serialize(service.ScannedFiles(), fileOpts));
@@ -122,7 +144,7 @@ try
         case "exclude":
             if (args.Length < 3 || args.Length > 4) throw new ArgumentException($"{args[0]} <project-folder> <file-path> [--human-only]");
             bool humanOnly = args[0] == "include" && args.Contains("--human-only");
-            service.SetFileIncluded(args[2], args[0] == "include", humanOnly);
+            service.SetFileIncluded(args[2], args[0] == "include", humanOnly, password);
             Console.WriteLine($"{(args[0] == "include" ? (humanOnly ? "Included (human-only)" : "Included") : "Excluded")} {args[2]}");
             break;
         case "list":Console.WriteLine(JsonSerializer.Serialize(project.Units(args.ElementAtOrDefault(2)??"",int.Parse(args.ElementAtOrDefault(3)??"0")),new JsonSerializerOptions{WriteIndented=true}));break;

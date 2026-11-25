@@ -9,7 +9,7 @@ public partial class MainWindow
 {
     private static bool MatchesSource(ProjectStore project, string source) =>
         StringComparer.OrdinalIgnoreCase.Equals(project.Info.Source, source)
-        || StringComparer.OrdinalIgnoreCase.Equals(project.Get("renpy-origin-for:" + project.Info.Source), source);
+        || StringComparer.OrdinalIgnoreCase.Equals(new ProjectSettings(project).GetRenpyOriginFor(project.Info.Source), source);
 
     private async void StartSteamSource(object sender, RoutedEventArgs e)
     {
@@ -79,6 +79,7 @@ public partial class MainWindow
     {
         if (projectPath == null) return;
         string path = projectPath, password = ZipPassword.Password;
+        if (!TrySyncSourceAdvancedSettings(path, includeEngine: true)) return;
         await Run(async cancellation =>
         {
             var capability = await Task.Run(() =>
@@ -100,7 +101,9 @@ public partial class MainWindow
             + (capability.Arabic.Length == 0 ? "" : "\n" + capability.Arabic);
     }
 
-    private async void GenerateRenpy(object sender, RoutedEventArgs e)
+    private async void GenerateRenpy(object sender, RoutedEventArgs e) => await GenerateRenpyCore();
+
+    private async Task GenerateRenpyCore()
     {
         if (projectPath == null || work != null) return;
         string path = projectPath, password = ZipPassword.Password;
@@ -137,7 +140,8 @@ public partial class MainWindow
     {
         const string setting = "renpy-sdk.txt";
         using var project = new ProjectStore(path);
-        string saved = project.Get("renpy_sdk");
+        var projSettings = new ProjectSettings(project);
+        string saved = projSettings.RenpySdk;
         if (Directory.Exists(saved))
         {
             try { GameRuntime.RequireRenpySdk(saved); return saved; }
@@ -148,7 +152,7 @@ public partial class MainWindow
         if (Directory.Exists(lastUsed)) picker.InitialDirectory = lastUsed;
         if (picker.ShowDialog(this) != true) throw new OperationCanceledException();
         GameRuntime.RequireRenpySdk(picker.FolderName);
-        project.Set("renpy_sdk", picker.FolderName);
+        projSettings.RenpySdk = picker.FolderName;
         File.WriteAllText(Path.Combine(UserData, setting), picker.FolderName);
         return picker.FolderName;
     }
@@ -170,9 +174,12 @@ public partial class MainWindow
         return picker.FileName;
     }
 
-    private async void TryGame(object sender, RoutedEventArgs e)
+    private async void TryGame(object sender, RoutedEventArgs e) => await TryGameCore();
+
+    private async Task TryGameCore()
     {
         if (projectPath == null) { Status.Text = "اختر لعبة أولاً."; return; }
+        if (!TrySyncSourceAdvancedSettings(projectPath)) return;
         if (!await EnsureOriginalsBeforeActionAsync("تجربة اللعبة المؤقتة")) return;
         string path = projectPath, password = ZipPassword.Password;
         await Run(async cancellation =>

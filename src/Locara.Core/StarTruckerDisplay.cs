@@ -76,12 +76,13 @@ public static partial class StarTruckerDisplay
 
     private enum WrapAtomKind { Text, Placeholder, OpenTag, CloseTag, VoidTag, Space }
 
-    private sealed class WrapAtom(WrapAtomKind kind, string raw, int visibleWidth, string tagName = "")
+    private sealed class WrapAtom(WrapAtomKind kind, string raw, int visibleWidth, string tagName = "", bool isBbCode = false)
     {
         public WrapAtomKind Kind { get; } = kind;
         public string Raw { get; } = raw;
         public int VisibleWidth { get; } = visibleWidth;
         public string TagName { get; } = tagName;
+        public bool IsBbCode { get; } = isBbCode;
         public bool HasClosingPair { get; set; }
     }
 
@@ -222,7 +223,12 @@ public static partial class StarTruckerDisplay
                 for (int t = activeTags.Count - 1; t >= 0; t--)
                 {
                     if (activeTags[t].HasClosingPair)
-                        sb.Append("</").Append(activeTags[t].TagName).Append('>');
+                    {
+                        if (activeTags[t].IsBbCode)
+                            sb.Append("[/").Append(activeTags[t].TagName).Append(']');
+                        else
+                            sb.Append("</").Append(activeTags[t].TagName).Append('>');
+                    }
                 }
             }
 
@@ -232,10 +238,58 @@ public static partial class StarTruckerDisplay
         return lines;
     }
 
+    private static HashSet<string> FindPairedBbCodeNames(IEnumerable<string> tokens)
+    {
+        var opens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var closes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string tok in tokens)
+        {
+            var m = BbCodeTagName().Match(tok);
+            if (!m.Success) continue;
+            string name = m.Groups["name"].Value;
+            if (m.Groups["close"].Success) closes.Add(name);
+            else opens.Add(name);
+        }
+        opens.IntersectWith(closes);
+        return opens;
+    }
+
+    private static bool TryParseRichTag(string tok, IReadOnlySet<string> pairedBbNames,
+        out string name, out bool isClose, out bool isSelfClose, out bool isBbCode)
+    {
+        var xmlMatch = XmlTagName().Match(tok);
+        if (xmlMatch.Success)
+        {
+            name = xmlMatch.Groups[1].Value;
+            isClose = tok.StartsWith("</", StringComparison.Ordinal);
+            isSelfClose = tok.EndsWith("/>", StringComparison.Ordinal);
+            isBbCode = false;
+            return true;
+        }
+        if (pairedBbNames.Count > 0)
+        {
+            var bbMatch = BbCodeTagName().Match(tok);
+            if (bbMatch.Success && pairedBbNames.Contains(bbMatch.Groups["name"].Value))
+            {
+                name = bbMatch.Groups["name"].Value;
+                isClose = bbMatch.Groups["close"].Success;
+                isSelfClose = false;
+                isBbCode = true;
+                return true;
+            }
+        }
+        name = "";
+        isClose = false;
+        isSelfClose = false;
+        isBbCode = false;
+        return false;
+    }
+
     private static List<WrapAtom> TokenizeForWrap(string paragraph)
     {
         var atoms = new List<WrapAtom>();
         var matches = Tokens.MatchTokens(paragraph);
+        var pairedBbNames = FindPairedBbCodeNames(matches.Select(m => m.Value));
         int cursor = 0;
 
         void AddPlainSegment(string segment)
@@ -265,26 +319,22 @@ public static partial class StarTruckerDisplay
                 AddPlainSegment(paragraph[cursor..match.Index]);
 
             string tok = match.Value;
-            var tagMatch = XmlTagName().Match(tok);
-            if (tagMatch.Success)
+            if (TryParseRichTag(tok, pairedBbNames, out string name, out bool isClose, out bool isSelfClose, out bool isBbCode))
             {
-                string name = tagMatch.Groups[1].Value;
-                bool isClose = tok.StartsWith("</", StringComparison.Ordinal);
-                bool isSelfClose = tok.EndsWith("/>", StringComparison.Ordinal);
-                if (isSelfClose || (!isClose && IsInlineVoidTag(name)))
+                if (isSelfClose || (!isClose && !isBbCode && IsInlineVoidTag(name)))
                 {
                     int width = name.Equals("sprite", StringComparison.OrdinalIgnoreCase)
                         || name.Equals("quad", StringComparison.OrdinalIgnoreCase) ? 2
                         : name.Equals("space", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
-                    atoms.Add(new WrapAtom(WrapAtomKind.VoidTag, tok, width, name));
+                    atoms.Add(new WrapAtom(WrapAtomKind.VoidTag, tok, width, name, isBbCode));
                 }
                 else if (isClose)
                 {
-                    atoms.Add(new WrapAtom(WrapAtomKind.CloseTag, tok, 0, name));
+                    atoms.Add(new WrapAtom(WrapAtomKind.CloseTag, tok, 0, name, isBbCode));
                 }
                 else
                 {
-                    atoms.Add(new WrapAtom(WrapAtomKind.OpenTag, tok, 0, name));
+                    atoms.Add(new WrapAtom(WrapAtomKind.OpenTag, tok, 0, name, isBbCode));
                 }
             }
             else
@@ -519,16 +569,14 @@ public static partial class StarTruckerDisplay
         core = masked;
         if (tokens.Count == 0) return;
 
+        var pairedBbNames = FindPairedBbCodeNames(tokens.Values);
         var openStack = new Stack<(string Key, string TagName)>();
         var unmatchedClose = new HashSet<string>(StringComparer.Ordinal);
         foreach (var (key, value) in tokens)
         {
-            var match = XmlTagName().Match(value);
-            if (!match.Success) continue;
-            bool isClose = value.StartsWith("</", StringComparison.Ordinal);
-            bool isSelfClose = value.EndsWith("/>", StringComparison.Ordinal);
-            string name = match.Groups[1].Value;
-            if (isSelfClose || (!isClose && IsInlineVoidTag(name))) continue;
+            if (!TryParseRichTag(value, pairedBbNames, out string name, out bool isClose, out bool isSelfClose, out bool isBbCode))
+                continue;
+            if (isSelfClose || (!isClose && !isBbCode && IsInlineVoidTag(name))) continue;
             if (!isClose)
                 openStack.Push((key, name));
             else if (openStack.Count > 0 && openStack.Peek().TagName.Equals(name, StringComparison.OrdinalIgnoreCase))
@@ -595,18 +643,16 @@ public static partial class StarTruckerDisplay
     private static string FixReversedTagPairs(string masked, string reordered, IReadOnlyDictionary<string, string> tokens)
     {
         if (tokens.Count == 0) return reordered;
+        var pairedBbNames = FindPairedBbCodeNames(tokens.Values);
         var openStack = new Stack<(string Key, string TagName)>();
         var pairs = new List<(string OpenKey, string CloseKey)>();
         var unmatchedClose = new List<string>();
         foreach (var (key, value) in tokens)
         {
             if (!masked.Contains(key, StringComparison.Ordinal)) continue;
-            var match = XmlTagName().Match(value);
-            if (!match.Success) continue;
-            bool isClose = value.StartsWith("</", StringComparison.Ordinal);
-            bool isSelfClose = value.EndsWith("/>", StringComparison.Ordinal);
-            string name = match.Groups[1].Value;
-            if (isSelfClose || (!isClose && IsInlineVoidTag(name))) continue;
+            if (!TryParseRichTag(value, pairedBbNames, out string name, out bool isClose, out bool isSelfClose, out bool isBbCode))
+                continue;
+            if (isSelfClose || (!isClose && !isBbCode && IsInlineVoidTag(name))) continue;
             if (!isClose)
             {
                 openStack.Push((key, name));
@@ -942,6 +988,8 @@ public static partial class StarTruckerDisplay
     private static partial Regex ArabicLetters();
     [GeneratedRegex(@"^</?([A-Za-z][A-Za-z0-9_-]*)\b[^>]*>$")]
     private static partial Regex XmlTagName();
+    [GeneratedRegex(@"^\[(?<close>/)?(?<name>[a-z][a-z0-9_-]*)(?:=[^\]\r\n]+)?\]$", RegexOptions.CultureInvariant)]
+    private static partial Regex BbCodeTagName();
     [GeneratedRegex(@"(\r\n|\n|<br\s*/?>)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex LineBreakPattern();
 

@@ -20,14 +20,17 @@ public static class Engines
     private static readonly Regex UnrealPakMarker = new(
         @"(?:^|/)Content/Paks/[^/]+\.pak$",
         RegexOptions.IgnoreCase);
+    private static readonly Regex GameMakerMarker = new(
+        @"(?:^|/)(?:data\.win|game\.unx|game\.ios)$",
+        RegexOptions.IgnoreCase);
     private static readonly Regex EngineInternalMetadata = new(
         @"(?:^|/)[^/]+_Data/(?:RuntimeInitializeOnLoads\.json|ScriptingAssemblies\.json|boot\.config|app\.info|StreamingAssets/aa/(?:settings|catalog)\.json|StreamingAssets/aa/AddressablesLink/link\.xml|(?:il2cpp_data|Managed|Plugins)/.+)$"
         + @"|(?:^|/)[^/]+_BackUpThisFolder_ButDontShipItWithYourGame/.+"
         + @"|(?:^|/)[^/]*(?:_monoscripts_|localization-assets-shared|localization-locales|unitybuiltinshaders|duplicateassetisolation)[^/]*\.bundle$"
-        + @"|(?:^|/)(?:MonoBleedingEdge|_CommonRedist|Redist|DirectX|vcredist|EasyAntiCheat|BattlEye|CrashHandler|steam_settings)/.+|"
+        + @"|(?:^|/)(?:MonoBleedingEdge|Mono/etc|_CommonRedist|Redist|DirectX|vcredist|EasyAntiCheat|BattlEye|CrashHandler|steam_settings)/.+|"
         + @"(?:^|/)UnityCrashHandler[^/]*$"
         + @"|(?:^|/)(?:Locara_Arabic_P|[^/]+_Locara_P)\.pak$"
-        + @"|(?:^|/)Engine/Config/StagedBuild_[^/]+\.ini$"
+        + @"|(?:^|/)(?:Engine/Config/[^/]+\.ini|[^/]+/Config/Default[^/]+\.ini)$"
         + @"|\.(?:deps|runtimeconfig)\.json$"
         + @"|\.(?:exe|dll)\.config$"
         + @"|(?:^|/)(?:package-lock\.json|manifest\.webmanifest|app\.manifest|dxvk\.conf|steam_appid\.txt)$",
@@ -43,7 +46,8 @@ public static class Engines
             || x.StartsWith("game/", StringComparison.OrdinalIgnoreCase) && Path.GetExtension(x).ToLowerInvariant() is ".rpyc" or ".rpa"),
             (_,_)=>true,"Generate Arabic translation templates in the matching Ren'Py SDK, edit game/tl/arabic, and copy the returned templates back to that language directory."),
         new EngineProfile("unity",r=>r.Any(x=>UnityDataMarker.IsMatch(x)),(_,_)=>true,"لعبة Unity — يدعم Locara حزم Addressables (.bundle) وI2 Localization وTextAsset داخل resources/sharedassets/data.unity3d مع حقن خط TextMeshPro العربي تلقائياً وخيار تصدير XUnity.AutoTranslator."),
-        new EngineProfile("unreal",r=>r.Any(x=>UnrealPakMarker.IsMatch(x)),(_,_)=>true,"لعبة Unreal Engine 4/5 — يقرأ Locara نصوص .locres مباشرة من حزم .pak ويولّد حزمة تعديل جاهزة (*_Locara_P.pak) أو يحدّث حزم UE5 IoStore بالتدفق المباشر مع حقن الخط العربي الثنائي."),
+        new EngineProfile("unreal",r=>r.Any(x=>UnrealPakMarker.IsMatch(x)),(_,_)=>true,"لعبة Unreal Engine 4/5 — يقرأ Locara نصوص .locres وجداول StringTable (.uasset) مباشرة من حزم .pak أو المجلدات ويولّد حزمة تعديل جاهزة (*_Locara_P.pak) أو يحدّث حزم UE5 IoStore بالتدفق المباشر مع حقن الخط العربي الثنائي."),
+        new EngineProfile("gamemaker",r=>r.Any(x=>GameMakerMarker.IsMatch(x)),(_,_)=>true,"لعبة GameMaker — يدعم Locara ملفات الترجمة الخارجية المصاحبة (JSON/CSV/INI/PO/TOML/Lua) مع التثبيت الموثّق وتجربة Steam."),
         new EngineProfile("generic",_=>true,(_,_)=>true,"Inspect the output manifest, then integrate resources using the game's documented language loading path.")
     ];
     public static IEngineProfile Resolve(string name, IReadOnlyList<string> resources, string source = "") =>

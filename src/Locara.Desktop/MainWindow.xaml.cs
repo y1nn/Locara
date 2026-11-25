@@ -94,13 +94,17 @@ public partial class MainWindow:Window
                 new ProjectService(project).EnsureCatalogSelected();
                 var info = project.Info;
                 var view = ReadEditorView(project, info.Source);
+                var projSettings = new ProjectSettings(project);
+                var unityDisplay = projSettings.ResolveUnityDisplayOptions();
                 return (project.DirectoryPath, Info: info, View: view, Page: ReadEditorPage(project, view),
                     Terms: project.Glossary().OrderBy(pair => pair.Key).ToList(),
                     TeamSettings: new TranslationTeam(project).Settings,
-                    DisplayFont: project.Get("display_font"),
-                    UnityWrap: project.Get("unity_arabic_wrap"),
-                    UnityScale: project.Get("unity_arabic_font_scale"),
-                    UnityShaping: project.Get("unity_arabic_shaping"));
+                    DisplayFont: projSettings.DisplayFont,
+                    UnityWrap: unityDisplay.WrapMode,
+                    UnityScale: unityDisplay.FontScale.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
+                    UnityShaping: unityDisplay.ShapeArabic ? "1" : "0",
+                    UnityContrast: unityDisplay.ContrastBoost ? "1" : "0",
+                    UnrealAesKey: projSettings.UnrealAesKey);
             });
             if (!IsLoaded) return false;
 
@@ -125,11 +129,12 @@ public partial class MainWindow:Window
             agentByWorker.Clear();
             liveEvents.Clear();
             LoadTeamRoleSettings(opened.TeamSettings);
-            LoadDisplayFontSelector(opened.DisplayFont, opened.UnityWrap, opened.UnityScale, opened.UnityShaping);
+            LoadDisplayFontSelector(opened.DisplayFont, opened.UnityWrap, opened.UnityScale, opened.UnityShaping, opened.UnityContrast);
             RefreshDirectInstallStatus();
             RefreshScannedFiles();
             PackageChoices.ItemsSource = null;
             ZipPassword.Clear();
+            UnrealAesKey.Text = opened.UnrealAesKey;
             ScanLog.Clear();
             BuildLog.Clear();
             TeamStatus.Text = "";
@@ -180,7 +185,7 @@ public partial class MainWindow:Window
 
     private sealed record EditorPageData(List<Unit> Rows, string Engine);
     private static EditorPageData ReadEditorPage(ProjectStore project, EditorView view) =>
-        new(project.Units(view.Search, view.Offset, status: view.Filter), project.Get("scanned_engine"));
+        new(project.Units(view.Search, view.Offset, status: view.Filter), new ProjectSettings(project).ScannedEngine);
 
     private async Task RefreshRows(bool rememberView = false)
     {
@@ -198,7 +203,7 @@ public partial class MainWindow:Window
             {
                 using var project = new ProjectStore(path);
                 var data = ReadEditorPage(project, view);
-                if (rememberView) project.Set(ViewKey(project), JsonSerializer.Serialize(view));
+                if (rememberView) new ProjectSettings(project).SetEditorViewRaw(JsonSerializer.Serialize(view));
                 return data;
             });
             if (request == editorRequest) ApplyEditorPage(page, view.Offset);
@@ -238,7 +243,7 @@ public partial class MainWindow:Window
             Rows.CommitEdit();
         }
         var edits = new List<(Unit Unit, bool Approve)>();
-        foreach (Unit row in Rows.Items)
+        foreach (Unit row in Rows.Items.OfType<Unit>())
         {
             bool approveRow = (row == selected && approve) || (approveUnits?.Contains(row) == true)
                 || (approvePage && row.Status != "conflict"
@@ -266,7 +271,7 @@ public partial class MainWindow:Window
                 if (MessageBox.Show(this, error.Message + "\nهل تريد إسقاط مسودة هذا السطر بعد نسخ ما تحتاجه؟",
                     "السطر لم يعد متاحاً", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
                 {
-                    var rows = Rows.Items.Cast<Unit>().Where(row => row != draft).ToList();
+                    var rows = Rows.Items.OfType<Unit>().Where(row => row != draft).ToList();
                     Rows.ItemsSource = rows;
                     savedTargets.Remove(draft.Id);
                 }
@@ -278,7 +283,7 @@ public partial class MainWindow:Window
             {
                 savedTargets[current.Id] = current.Target;
                 if (choice == MessageBoxResult.Yes) current.Target = draft.Target;
-                Rows.ItemsSource = Rows.Items.Cast<Unit>().Select(row => row == draft ? current : row).ToList();
+                Rows.ItemsSource = Rows.Items.OfType<Unit>().Select(row => row == draft ? current : row).ToList();
                 Rows.SelectedItem = current;
             }
         }
@@ -443,7 +448,7 @@ public partial class MainWindow:Window
         if (File.Exists(Path.Combine(destination, "project.db")))
             throw new InvalidOperationException("مجلد المشروع مرتبط بمصدر مختلف. انقل المشروع أو اختر مجلد مشاريع آخر.");
         using var project = ProjectStore.Create(destination, name.Length == 0 ? "مشروع تعريب" : name, source);
-        project.Set("automatic_output", "true");
+        new ProjectSettings(project).AutomaticOutput = true;
         return (destination, true);
     }
 
@@ -462,7 +467,7 @@ public partial class MainWindow:Window
         var dialog = new OpenFolderDialog();
         if (dialog.ShowDialog(this) == true && await ChangeSource(dialog.FolderName)) await LoadPackages();
     }
-    private async void ChooseFile(object sender,RoutedEventArgs e){var d=new OpenFileDialog{Filter="Resources|*.json;*.csv;*.tsv;*.ini;*.xml;*.yaml;*.yml;*.po;*.pot;*.xlsx;*.xlf;*.xliff;*.rpy;*.rpym;*.bundle;*.zip;*.pck|All files|*.*"};if(d.ShowDialog()==true)await ChangeSource(d.FileName);}
+    private async void ChooseFile(object sender,RoutedEventArgs e){var d=new OpenFileDialog{Filter="Resources|*.json;*.csv;*.tsv;*.ini;*.cfg;*.xml;*.yaml;*.yml;*.toml;*.strings;*.lua;*.po;*.pot;*.xlsx;*.xlf;*.xliff;*.rpy;*.rpym;*.bundle;*.locres;*.uasset;*.pak;*.translation;*.zip;*.pck;*.txt|All files|*.*"};if(d.ShowDialog()==true)await ChangeSource(d.FileName);}
     private async Task<bool> ChangeSource(string source)
     {
         if (projectPath is not { } path) { Status.Text = "أنشئ مشروعاً أولاً."; return false; }
@@ -573,6 +578,36 @@ public partial class MainWindow:Window
         catch (Exception error) { Status.Text = error.Message; }
     }
 
+    private bool TrySyncSourceAdvancedSettings(string path, bool includeEngine = false)
+    {
+        string aesKey = UnrealAesKey.Text.Trim();
+        if (aesKey.Length > 0 && !ProjectSettings.IsValidUnrealAesKey(aesKey))
+        {
+            Status.Text = "مفتاح Unreal AES غير صالح — يجب أن يكون 64 حرف Hex (مع أو بدون 0x) أو 44 حرف Base64 (256-بت).";
+            SourceAdvancedExpander.IsExpanded = true;
+            return false;
+        }
+        try
+        {
+            using var project = new ProjectStore(path);
+            var projSettings = new ProjectSettings(project);
+            if (projSettings.UnrealAesKey != aesKey)
+                projSettings.UnrealAesKey = aesKey;
+            if (includeEngine)
+            {
+                string engine = Selected(Engine);
+                if (projSettings.Engine != engine)
+                    projSettings.Engine = engine;
+            }
+            return true;
+        }
+        catch (Exception error)
+        {
+            Status.Text = error.Message;
+            return false;
+        }
+    }
+
     private async void Scan(object sender, RoutedEventArgs e) => await ScanCurrent();
 
     private async Task ScanCurrent(bool openEditor = false)
@@ -583,17 +618,18 @@ public partial class MainWindow:Window
             Status.Text = "اختر مصدراً للفحص أولاً.";
             return;
         }
-        string path = projectPath, password = ZipPassword.Password, engine = Selected(Engine);
+        string path = projectPath, password = ZipPassword.Password;
+        if (!TrySyncSourceAdvancedSettings(path, includeEngine: true)) return;
         await Run(async cancellation =>
         {
             var result = await Task.Run(() =>
             {
                 using var project = new ProjectStore(path);
-                project.Set("engine", engine);
+                var projSettings = new ProjectSettings(project);
                 var service = new ProjectService(project);
                 var scan = service.Scan(password, cancellation);
                 return (Scan: scan, Capability: service.Capabilities(password, cancellation),
-                    Version: project.Get("scan_version"), View: openEditor ? ReadEditorView(project, project.Info.Source) : null);
+                    Version: projSettings.ScanVersion, View: openEditor ? ReadEditorView(project, project.Info.Source) : null);
             }, cancellation);
             var scan = result.Scan;
             SetCapabilities(result.Capability, result.Version);
@@ -601,6 +637,8 @@ public partial class MainWindow:Window
                 + $"{scan.Files} ملفات / {scan.Units} نصوص\n"
                 + DescribeCapability(result.Capability) + "\n"
                 + string.Join('\n', scan.Diagnostics.Select(item => item.Path + " — " + item.Message));
+            bool needsAesHint = scan.Units == 0 && scan.Diagnostics.Any(d => d.Message.Contains("AES", StringComparison.OrdinalIgnoreCase));
+            if (needsAesHint) SourceAdvancedExpander.IsExpanded = true;
             ScanLogExpander.IsExpanded = scan.Diagnostics.Count > 0 || scan.Units == 0;
             RefreshScannedFiles();
             if (openEditor && scan.Units > 0)
@@ -635,6 +673,7 @@ public partial class MainWindow:Window
     {
         packagePath = null;
         if (projectPath == null || !SaveEdits()) return;
+        if (!TrySyncSourceAdvancedSettings(projectPath)) return;
         if (!await EnsureOriginalsBeforeActionAsync(final ? "بناء حزمة نهائية" : "بناء حزمة تجربة")) return;
         string path = projectPath, password = ZipPassword.Password;
         await Run(async cancellation =>
@@ -657,7 +696,7 @@ public partial class MainWindow:Window
             string destination;
             using (var project = new ProjectStore(path))
             {
-                destination = project.Get("automatic_output") == "true"
+                destination = new ProjectSettings(project).AutomaticOutput
                     ? Path.Combine(path, "outputs", (final ? "final-" : "preview-") + Guid.NewGuid().ToString("N"))
                     : "";
             }

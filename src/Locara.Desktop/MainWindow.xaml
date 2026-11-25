@@ -528,6 +528,11 @@
 
       <Expander Header="تعليمات الأسلوب والأدوار (Prompts)" x:Name="RolesPanel">
        <StackPanel Margin="4">
+        <WrapPanel Margin="0,0,0,6">
+         <TextBlock Text="قالب أسلوب جاهز:" VerticalAlignment="Center" FontSize="12" Foreground="#174B45" FontWeight="SemiBold" Margin="0,0,8,0"/>
+         <ComboBox x:Name="PromptPresetSelector" Width="340" DisplayMemberPath="Name" FontSize="12" Padding="8,4" AutomationProperties.Name="قالب التوجيهات الجاهز"/>
+         <Button Content="تطبيق القالب المختار" Click="ApplySelectedPromptPreset" Background="#17645E" Foreground="White" FontSize="12" Padding="10,5"/>
+        </WrapPanel>
         <TextBlock Text="أسلوب الترجمة للمشروع (مثال: فصحى معاصرة موجزة للأزرار وطبيعية للحوار)" FontSize="12" Foreground="#4D6468"/>
         <TextBox x:Name="TeamStyleInput" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="56"/>
         <TextBlock Text="تعليمات إضافية للمشرف / المترجم / المراجع (اختياري)" FontSize="12" Foreground="#4D6468"/>
@@ -737,6 +742,7 @@
            </ComboBox>
           </WrapPanel>
           <CheckBox x:Name="UnityArabicShapingToggle" Content="تشكيل وترتيب العربية مسبقاً لـ TextMeshPro (أوقِفه فقط إذا كانت اللعبة تدعم RTL أصلياً)" IsChecked="True" Checked="SelectUnityArabicSettings" Unchecked="SelectUnityArabicSettings" FontSize="12" Foreground="#174B45" Margin="0,4,0,2"/>
+          <CheckBox x:Name="UnityContrastBoostToggle" Content="تعزيز وضوح وتباين الحروف العربية على الأزرار الفاتحة (خط أعرض + تمديد حواف SDF)" IsChecked="False" Checked="SelectUnityArabicSettings" Unchecked="SelectUnityArabicSettings" FontSize="12" Foreground="#174B45" Margin="0,2,0,2"/>
           <TextBlock Text="يمنع الالتفاف الذكي انقلاب الفقرات العربية الطويلة من أسفل لأعلى داخل بطاقات Unity TMP، ويُحفظ تلقائياً للمشروع ويُطبّق عند التجربة أو التثبيت الدائم." FontSize="11" Foreground="#4B6266" TextWrapping="Wrap" Margin="0,2,0,0"/>
          </StackPanel>
         </Border>
@@ -831,7 +837,7 @@
       </StackPanel>
      </Border>
 
-     <Expander Grid.Row="1" Header="خيارات متقدمة (الحزم وضبط الاستخراج والمحرّك)">
+     <Expander x:Name="SourceAdvancedExpander" Grid.Row="1" Header="خيارات متقدمة (الحزم وضبط الاستخراج ومفتاح AES والمحرّك)">
       <StackPanel Margin="4">
        <WrapPanel>
         <TextBlock Text="المحرك" VerticalAlignment="Center"/>
@@ -843,9 +849,12 @@
          <ComboBoxItem Content="renpy"/>
          <ComboBoxItem Content="unity"/>
          <ComboBoxItem Content="unreal"/>
+         <ComboBoxItem Content="gamemaker"/>
         </ComboBox>
         <TextBlock Text="كلمة مرور ZIP" VerticalAlignment="Center"/>
-        <PasswordBox x:Name="ZipPassword" Width="200"/>
+        <PasswordBox x:Name="ZipPassword" Width="160"/>
+        <TextBlock Text="مفتاح Unreal AES" VerticalAlignment="Center" ToolTip="اختياري لحزم Unreal المشفّرة (64 حرف Hex بصيغة 0x... أو Base64)"/>
+        <TextBox x:Name="UnrealAesKey" Width="210" FlowDirection="LeftToRight" FontFamily="Consolas" ToolTip="اختياري: ألصق مفتاح AES-256 (0x... أو Base64) لحزم Unreal المشفّرة ثم اضغط فحص الملفات"/>
         <Button Content="إعداد الاستخراج" Click="ConfigureExtraction"/>
         <Button Content="قدرات المصدر" Click="ShowCapabilities"/>
        </WrapPanel>

@@ -72,6 +72,8 @@ public partial class MainWindow
         {
             get
             {
+                if (!included && summary.TotalUnits == 0 && summary.Verdict is FileQualityVerdict.SecondaryLanguage or FileQualityVerdict.AuxiliaryData)
+                    return "مُتخطّى";
                 if (included && humanOnlyFilter && includedUnits < summary.TotalUnits)
                     return $"{includedUnits:N0}/{summary.TotalUnits:N0} (بشري)";
                 return summary.ApprovedUnits > 0
@@ -105,6 +107,7 @@ public partial class MainWindow
 
     private int filesRefreshRequest;
     private bool updatingFileSelection;
+    private bool updatingFiles;
     private List<ScannedFileRow> currentScannedFiles = [];
 
     private void FilterScannedFilesChanged(object sender, RoutedEventArgs e)
@@ -277,7 +280,11 @@ public partial class MainWindow
             : $"التصنيف: {row.VerdictLabel} — {row.Reason}";
         SelectedFileReasonText.Foreground = row.VerdictBrush;
         SelectedFileSamplesText.Text = row.Samples.Count == 0
-            ? "(لا توجد نصوص مستخرجة في هذا الملف)"
+            ? (row.Verdict == FileQualityVerdict.SecondaryLanguage && !row.Included
+                ? "(تم تخطي تحليل ملف اللغة الإضافية لتسريع الفحص وتوفير الذاكرة — فعّل الملف من مربع التضمين لاستخراج نصوصه فوراً)"
+                : row.Verdict == FileQualityVerdict.AuxiliaryData && !row.Included
+                    ? "(تم تخطي تحليل الملف الجانبي لتسريع الفحص لوجود ملفات ترجمة رسمية — فعّل الملف من مربع التضمين لاستخراج نصوصه فوراً)"
+                    : "(لا توجد نصوص مستخرجة في هذا الملف)")
             : string.Join('\n', row.Samples.Select((s, i) => $"{i + 1}. {s}"));
 
         if (IncludeHumanOnlyButton != null)
@@ -289,15 +296,18 @@ public partial class MainWindow
 
     private async void IncludeHumanOnlySelectedFile(object sender, RoutedEventArgs e)
     {
-        if (projectPath == null || work != null || ScannedFilesGrid.SelectedItem is not ScannedFileRow row) return;
+        if (projectPath == null || work != null || updatingFiles || ScannedFilesGrid.SelectedItem is not ScannedFileRow row) return;
         string path = projectPath;
+        string pwd = ZipPassword.Password;
+        updatingFiles = true;
         try
         {
             await Task.Run(() =>
             {
                 using var store = new ProjectStore(path);
-                new ProjectService(store).SetFileIncluded(row.Path, included: true, humanOnly: true);
+                new ProjectService(store).SetFileIncluded(row.Path, included: true, humanOnly: true, pwd);
             });
+            if (!IsLoaded || projectPath != path) return;
             Status.Text = $"تم تفعيل النصوص البشرية فقط في «{row.Path}» وحماية القيم التقنية من التعديل.";
             RefreshScannedFiles();
             await RefreshRows();
@@ -305,29 +315,38 @@ public partial class MainWindow
         }
         catch (Exception error)
         {
-            Status.Text = error.Message;
+            if (IsLoaded && projectPath == path) Status.Text = error.Message;
         }
+        finally { updatingFiles = false; }
     }
 
     private async void ToggleScannedFile(object sender, RoutedEventArgs e)
     {
-        if (updatingFileSelection || projectPath == null || work != null) return;
+        if (updatingFileSelection || updatingFiles || projectPath == null || work != null) return;
         if (sender is not CheckBox cb || cb.DataContext is not ScannedFileRow row) return;
         bool included = cb.IsChecked == true;
         row.Included = included;
         row.HumanOnlyFilter = false;
         row.IncludedUnits = included ? row.TotalUnits : 0;
 
+        bool wasLazyZero = included && row.TotalUnits == 0;
         string path = projectPath;
+        string pwd = ZipPassword.Password;
+        updatingFiles = true;
         try
         {
             await Task.Run(() =>
             {
                 using var store = new ProjectStore(path);
-                new ProjectService(store).SetFileIncluded(row.Path, included);
+                new ProjectService(store).SetFileIncluded(row.Path, included, humanOnly: false, pwd);
             });
-            UpdateFilesSummaryAndGuards();
-            UpdateSelectedFilePreview(row);
+            if (!IsLoaded || projectPath != path) return;
+            if (wasLazyZero) RefreshScannedFiles();
+            else
+            {
+                UpdateFilesSummaryAndGuards();
+                UpdateSelectedFilePreview(row);
+            }
             Status.Text = included
                 ? $"تم تفعيل الملف «{row.Path}» للترجمة."
                 : $"تم استبعاد الملف «{row.Path}» (لن يُترجم ولن يُعدّل عند البناء).";
@@ -337,9 +356,13 @@ public partial class MainWindow
         catch (Exception error)
         {
             row.Included = !included;
-            Status.Text = error.Message;
-            RefreshScannedFiles();
+            if (IsLoaded && projectPath == path)
+            {
+                Status.Text = error.Message;
+                RefreshScannedFiles();
+            }
         }
+        finally { updatingFiles = false; }
     }
 
     private async void SelectAllScannedFiles(object sender, RoutedEventArgs e) =>
@@ -354,7 +377,7 @@ public partial class MainWindow
 
     private async Task ApplyBulkFileSelection(Func<ScannedFileRow, bool> predicate, string message)
     {
-        if (projectPath == null || work != null || currentScannedFiles.Count == 0) return;
+        if (projectPath == null || work != null || updatingFiles || currentScannedFiles.Count == 0) return;
         string path = projectPath;
         var map = new Dictionary<string, bool>(StringComparer.Ordinal);
         foreach (var row in currentScannedFiles)
@@ -366,24 +389,36 @@ public partial class MainWindow
             map[row.Path] = next;
         }
 
+        bool anyLazyIncluded = currentScannedFiles.Any(r => r.Included && r.TotalUnits == 0);
+        string pwd = ZipPassword.Password;
+        updatingFiles = true;
         try
         {
             await Task.Run(() =>
             {
                 using var store = new ProjectStore(path);
-                new ProjectService(store).SetFilesIncluded(map);
+                new ProjectService(store).SetFilesIncluded(map, pwd);
             });
-            UpdateFilesSummaryAndGuards();
-            UpdateSelectedFilePreview(ScannedFilesGrid.SelectedItem as ScannedFileRow);
+            if (!IsLoaded || projectPath != path) return;
+            if (anyLazyIncluded) RefreshScannedFiles();
+            else
+            {
+                UpdateFilesSummaryAndGuards();
+                UpdateSelectedFilePreview(ScannedFilesGrid.SelectedItem as ScannedFileRow);
+            }
             Status.Text = message;
             await RefreshRows();
             UpdateOverview();
         }
         catch (Exception error)
         {
-            Status.Text = error.Message;
-            RefreshScannedFiles();
+            if (IsLoaded && projectPath == path)
+            {
+                Status.Text = error.Message;
+                RefreshScannedFiles();
+            }
         }
+        finally { updatingFiles = false; }
     }
 
     private async void RunAiScout(object sender, RoutedEventArgs e)

@@ -545,7 +545,7 @@ public partial class MainWindow
                 var preview = service.Preview(password: password, cancellation: cancellation);
                 if (preview.ChangedFiles.Count == 0) return null;
                 var result = service.Build(Path.Combine(path, "outputs", "preview-" + Guid.NewGuid().ToString("N")),
-                    password: password, cancellation: cancellation, reviewed: preview);
+                    password: password, cancellation: cancellation, reviewed: preview, overlayOnly: true);
                 project.LastOutput = result.Directory;
                 return result;
             }, cancellation);

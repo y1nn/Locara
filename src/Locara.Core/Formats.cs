@@ -12,19 +12,21 @@ namespace Locara.Core;
 
 public static class Formats
 {
-    public static IReadOnlyList<IFormatHandler> All { get; } = [new JsonFormat(), new DelimitedFormat(','), new DelimitedFormat('\t'), new XmlFormat(), new IniFormat(), new YamlFormat(), new PoFormat(), new SpreadsheetFormat(), new RenpyFormat(), new UnityBundleFormat(), UnityI2Format.Instance, UnityAssetsFormat.Instance, UnrealLocresFormat.Instance, UnrealPakFormat.Instance, GodotTranslationFormat.Instance, XUnityTranslationFormat.Instance];
+    public static IReadOnlyList<IFormatHandler> All { get; } =
+        LocalizationProviderRegistry.All.Select(p => p.Handler).ToArray();
     internal static bool IsArabicTarget(string? language) => string.IsNullOrWhiteSpace(language)
         || language.Split('-', '_')[0].Equals("ar", StringComparison.OrdinalIgnoreCase)
         || language.Equals("arabic", StringComparison.OrdinalIgnoreCase);
     public static IFormatHandler? For(string path) => All.FirstOrDefault(f => f.Supports(path));
 
-    public static bool Configurable(string path) => For(path) is DelimitedFormat or SpreadsheetFormat or JsonFormat or XmlFormat or IniFormat or YamlFormat;
+    public static bool Configurable(string path) =>
+        For(path) is { } fmt && LocalizationProviderRegistry.TryGetByName(fmt.Name, out var p) && p.Metadata.IsConfigurable;
 
     internal static ExtractionPreview Inspect(byte[] bytes, IFormatHandler format, ExtractionRule? rule) => format switch
     {
         DelimitedFormat table => new([table.Inspect(bytes)], [], rule),
         SpreadsheetFormat workbook => new(workbook.Inspect(bytes), [], rule),
-        JsonFormat or XmlFormat or IniFormat or YamlFormat or StarTruckerCatalog => new([], format.Extract(bytes), rule),
+        JsonFormat or XmlFormat or IniFormat or YamlFormat or TomlFormat or LuaFormat or StarTruckerCatalog => new([], format.Extract(bytes), rule),
         _ => throw new NotSupportedException("هذا المورد يستخدم قواعد المحرك والصيغة الحالية.")
     };
 
@@ -70,9 +72,28 @@ public static class Formats
 
 public sealed class JsonFormat : IFormatHandler
 {
+    private static readonly JsonDocumentOptions ParseOptions = new()
+    {
+        CommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true
+    };
     public string Name => "json";
     public bool Supports(string path) => path.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
     private static string Escape(string key) => key.Replace("~", "~0").Replace("/", "~1");
+    private static bool HasUtf8Bom(byte[] bytes) =>
+        bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+    private static JsonNode? ParseNode(byte[] bytes)
+    {
+        ReadOnlySpan<byte> payload = HasUtf8Bom(bytes) ? bytes.AsSpan(3) : bytes.AsSpan();
+        try
+        {
+            return JsonNode.Parse(payload, nodeOptions: null, documentOptions: ParseOptions);
+        }
+        catch (InvalidOperationException error)
+        {
+            throw new InvalidDataException("ملف JSON يحتوي على ترميز UTF-8 غير صالح.", error);
+        }
+    }
     private static void Walk(JsonNode? node, string path, Action<string, string> found)
     {
         if (node is JsonObject obj) foreach (var pair in obj) Walk(pair.Value, path + "/" + Escape(pair.Key), found);
@@ -81,13 +102,22 @@ public sealed class JsonFormat : IFormatHandler
     }
     public IReadOnlyList<TextSlot> Extract(byte[] bytes)
     {
-        var result = new List<TextSlot>(); Walk(JsonNode.Parse(bytes), "", (p, s) => result.Add(new(p, s, p))); return result;
+        try
+        {
+            var result = new List<TextSlot>();
+            Walk(ParseNode(bytes), "", (p, s) => result.Add(new(p, s, p)));
+            return result;
+        }
+        catch (InvalidOperationException error)
+        {
+            throw new InvalidDataException("ملف JSON يحتوي على ترميز UTF-8 غير صالح.", error);
+        }
     }
     public byte[] Apply(byte[] bytes, IReadOnlyDictionary<string,string> translations)
     {
         var slots = Extract(bytes);
         if (!slots.Any(slot => translations.TryGetValue(slot.Locator, out var target) && target != slot.Source)) return bytes;
-        var root = JsonNode.Parse(bytes);
+        var root = ParseNode(bytes);
         foreach (var slot in slots)
         {
             if (!translations.TryGetValue(slot.Locator, out var target)) continue;
@@ -97,7 +127,13 @@ public sealed class JsonFormat : IFormatHandler
             foreach (var part in parts[..^1]) parent = parent is JsonArray a ? a[int.Parse(part)] : parent![part];
             if (parent is JsonArray arr) arr[int.Parse(parts[^1])] = target; else parent![parts[^1]] = target;
         }
-        return Encoding.UTF8.GetBytes(root?.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }) ?? "null");
+        string serialized = root?.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }) ?? "null";
+        byte[] body = Encoding.UTF8.GetBytes(serialized);
+        if (!HasUtf8Bom(bytes)) return body;
+        byte[] withBom = new byte[body.Length + 3];
+        withBom[0] = 0xEF; withBom[1] = 0xBB; withBom[2] = 0xBF;
+        Buffer.BlockCopy(body, 0, withBom, 3, body.Length);
+        return withBom;
     }
 }
 
@@ -296,17 +332,23 @@ public sealed class XmlFormat : IFormatHandler
 
 public sealed class IniFormat : IFormatHandler
 {
-    public string Name=>"ini";
-    public bool Supports(string path)=>Path.GetExtension(path).Equals(".ini",StringComparison.OrdinalIgnoreCase);
-    private static IEnumerable<(string Key,int Line,string Prefix,string Value)> Entries(string[] lines)
+    public string Name => "ini";
+    public bool Supports(string path) => Path.GetExtension(path).Equals(".ini", StringComparison.OrdinalIgnoreCase);
+    private static IEnumerable<(string Key, int Line, string Prefix, string Value)> Entries(string[] lines)
     {
-        string section=""; var seen=new HashSet<string>();
-        for(int i=0;i<lines.Length;i++)
+        string section = "";
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < lines.Length; i++)
         {
-            string s=lines[i].Trim(); if(s.StartsWith('[')&&s.EndsWith(']')) {section=s;continue;}
-            int pos=lines[i].IndexOf('='); if(pos<0||s.StartsWith(';')||s.StartsWith('#'))continue;
-            string key=section+"/"+lines[i][..pos].Trim(); if(!seen.Add(key))throw new InvalidDataException("Duplicate INI key.");
-            yield return (key,i,lines[i][..(pos+1)],lines[i][(pos+1)..]);
+            string s = lines[i].Trim();
+            if (s.StartsWith('[') && s.EndsWith(']')) { section = s; continue; }
+            int pos = lines[i].IndexOf('=');
+            if (pos < 0 || s.StartsWith(';') || s.StartsWith('#')) continue;
+            string baseKey = section + "/" + lines[i][..pos].Trim();
+            int occurrence = counts.GetValueOrDefault(baseKey) + 1;
+            counts[baseKey] = occurrence;
+            string locator = occurrence == 1 ? baseKey : $"{baseKey}#{occurrence}";
+            yield return (locator, i, lines[i][..(pos + 1)], lines[i][(pos + 1)..]);
         }
     }
     public IReadOnlyList<TextSlot> Extract(byte[] bytes) =>
@@ -337,15 +379,53 @@ public sealed class YamlFormat : IFormatHandler
 {
     public string Name=>"yaml";
     public bool Supports(string path)=>new[]{".yml",".yaml"}.Contains(Path.GetExtension(path).ToLowerInvariant());
-    private static YamlStream Read(byte[] b){var y=new YamlStream();y.Load(new StringReader(Encoding.UTF8.GetString(b)));return y;}
+    private static bool HasUtf8Bom(byte[] b) => b.Length >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF;
+    private static YamlStream Read(byte[] b)
+    {
+        string text = HasUtf8Bom(b) ? Encoding.UTF8.GetString(b, 3, b.Length - 3) : Encoding.UTF8.GetString(b);
+        var y = new YamlStream();
+        y.Load(new StringReader(text));
+        return y;
+    }
     private static void Walk(YamlNode n,string key,Action<string,YamlScalarNode> found)
     {
         if(n is YamlMappingNode m) foreach(var p in m.Children) Walk(p.Value,key+"/"+p.Key.ToString().Replace("~","~0").Replace("/","~1"),found);
         else if(n is YamlSequenceNode a)for(int i=0;i<a.Children.Count;i++)Walk(a.Children[i],key+"/"+i,found);
         else if(n is YamlScalarNode s && !string.IsNullOrWhiteSpace(s.Value) && !double.TryParse(s.Value,out _) && s.Value is not ("true" or "false" or "null"))found(key,s);
     }
-    public IReadOnlyList<TextSlot> Extract(byte[] bytes){var y=Read(bytes);var r=new List<TextSlot>();for(int i=0;i<y.Documents.Count;i++)Walk(y.Documents[i].RootNode,i.ToString(),(k,s)=>r.Add(new(k,s.Value!)));return r;}
-    public byte[] Apply(byte[] bytes,IReadOnlyDictionary<string,string> translations){var y=Read(bytes);for(int i=0;i<y.Documents.Count;i++)Walk(y.Documents[i].RootNode,i.ToString(),(k,s)=>{if(translations.TryGetValue(k,out var t))s.Value=t;});using var w=new StringWriter();y.Save(w,false);return Encoding.UTF8.GetBytes(w.ToString());}
+    public IReadOnlyList<TextSlot> Extract(byte[] bytes)
+    {
+        var y = Read(bytes);
+        var r = new List<TextSlot>();
+        for (int i = 0; i < y.Documents.Count; i++) Walk(y.Documents[i].RootNode, i.ToString(), (k, s) => r.Add(new(k, s.Value!, k)));
+        return r;
+    }
+    public byte[] Apply(byte[] bytes, IReadOnlyDictionary<string, string> translations)
+    {
+        if (translations.Count == 0) return bytes;
+        var y = Read(bytes);
+        bool changed = false;
+        for (int i = 0; i < y.Documents.Count; i++)
+        {
+            Walk(y.Documents[i].RootNode, i.ToString(), (k, s) =>
+            {
+                if (translations.TryGetValue(k, out var t) && t != s.Value)
+                {
+                    s.Value = t;
+                    changed = true;
+                }
+            });
+        }
+        if (!changed) return bytes;
+        using var w = new StringWriter();
+        y.Save(w, false);
+        byte[] body = Encoding.UTF8.GetBytes(w.ToString());
+        if (!HasUtf8Bom(bytes)) return body;
+        byte[] withBom = new byte[body.Length + 3];
+        withBom[0] = 0xEF; withBom[1] = 0xBB; withBom[2] = 0xBF;
+        Buffer.BlockCopy(body, 0, withBom, 3, body.Length);
+        return withBom;
+    }
 }
 
 public sealed class SpreadsheetFormat : IFormatHandler
