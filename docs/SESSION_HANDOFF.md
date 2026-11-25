@@ -7,7 +7,7 @@ Concise engineering reference for maintaining and extending **Locara** (post-`v1
 ## 1. Build, Test, CI & Publish Commands
 
 - **SDK:** `.NET 10.0.404` pinned in [global.json](../global.json) (`TreatWarningsAsErrors=true`, `RestorePackagesWithLockFile=true`).
-- **Build & Test (`95` xUnit tests):**
+- **Build & Test (`103` xUnit tests):**
   ```powershell
   dotnet build -c Release -p:RestoreLockedMode=true
   dotnet test -c Release --no-build
@@ -26,7 +26,7 @@ Concise engineering reference for maintaining and extending **Locara** (post-`v1
 | File | Responsibility |
 |---|---|
 | `Models.cs` | Core records, `Identity.SafePath`, `Identity.RequireNoLinks`, `ExtractionRule.FieldPatterns`, `LocaraPaths.UserDataDirectory` (`Locara` with `Locara2` fallback) |
-| `ProjectStore.cs` / `ProjectSettings.cs` | SQLite WAL store (Schema v5) + strongly-typed `ProjectSettings` accessor (`UnrealAesKey`, `GettextPoTarget`, `UnityDisplayOptions`, scan state & file selections) |
+| `ProjectStore.cs` / `ProjectSettings.cs` | SQLite WAL store (Schema v6, including `bot_glossary` & persisted scene context) + strongly-typed `ProjectSettings` accessor (`UnrealAesKey`, `GettextPoTarget`, `UnityDisplayOptions`, scan state & file selections) |
 | `LocalizationProviders.cs` / `LocaleClassifier.cs` | Unified `ILocalizationProvider` registry (`FormatMetadata`, content probing, streamed disk extraction) and BCP-47 / localization-directory `LocaleClassifier` |
 | `ProjectService.cs` / `ProjectService.Scan.cs` / `ProjectService.Build.cs` | Modularized source/package discovery, two-pass scan with secondary-locale & auxiliary lazy-skip, file catalog & AI Scout application, Gettext `.pot -> .po` delivery, Unity TMP/font patching, and verified builds |
 | `Engines.cs` | Engine detection (`godot`, `rpgmaker`, `renpy`, `unity`, `unreal`, `gamemaker`, `generic`), `IsEngineInternalMetadata`, RPG Maker event command extraction |
@@ -47,7 +47,7 @@ Concise engineering reference for maintaining and extending **Locara** (post-`v1
 | `UnrealStringTableFormat.cs` | Pure-C# UE4/UE5 `UStringTable` `.uasset` (standalone and split `.uasset` + `.uexp` pairs) reader/writer |
 | `UnrealPakCodec.cs` | Pure-C# `.pak` v4–v12 reader (including AES-256 ECB encrypted index & payload decryption), v8/v11/v12 drop-in `*_Locara_P.pak` writer, UE5 IoStore streaming `PatchExistingPak`, `.locres` + `StringTable` `.uasset`/`.uexp` + bilingual `.ufont`/`.ttf` patcher |
 | `GodotTranslationFormat.cs` | Pure-C# Godot 3 & 4 `RSRC` and compressed `RSCC` (`FastLZ`, `Zlib/Deflate`, `Zstd`, `Gzip`) `.translation` (`OptimizedTranslation` / `PHashTranslation` with SMAZ + `Translation`) |
-| `Translation.cs` / `TranslationTeam.cs` | Token masking/validation, API providers, `ArabicPromptPresets` (6 genre presets), parallel Supervisor/Translator/Reviewer team, transient network retry (`CanRetry`) |
+| `Translation.cs` / `TranslationBots.cs` / `TranslationTeam.cs` | Token masking/validation, multi-turn `ChatTurn[]` API providers, `ArabicPromptPresets`, autonomous Lore & Glossary Bot (`GameTermMiner`), contiguous `SceneLaneBuilder` + rolling `SceneSessionState` + `LiveGlossary`, and `SmartQaEvaluator` |
 | `PackageInstaller.cs` / `SteamGameTrial.cs` / `StarTruckerTrial.cs` | SHA-256 verified in-place install/restore (supports newly added drop-in files & companion `.uexp` files) + Steam auto-restore trials |
 
 ---

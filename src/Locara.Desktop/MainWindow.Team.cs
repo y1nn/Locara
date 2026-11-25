@@ -342,7 +342,7 @@ public partial class MainWindow
             string targetBatch = (settings.BatchSize > 0 ? settings.BatchSize : 30).ToString();
             BatchSizeChoice.SelectedValue = BatchSizeChoice.Items.OfType<ComboBoxItem>().Any(i => Equals(i.Tag, targetBatch))
                 ? targetBatch : "30";
-            SpeedMode.SelectedValue = settings.FastMode ? "fast" : "team";
+            SpeedMode.SelectedValue = settings.FastMode ? "fast" : settings.SmartReview ? "smart" : "team";
 
             var roleChoices = BuildRoleProfileChoices("الافتراضي (الاتصال النشط)");
             SetRoleRoutingUi(TranslatorProfileInput, TranslatorModelInput, settings.TranslatorProfile, settings.TranslatorModel, roleChoices);
@@ -384,6 +384,7 @@ public partial class MainWindow
     private int SelectedWorkers() => int.TryParse(WorkersCount.SelectedValue as string, out int n) ? Math.Clamp(n, 1, 16) : 4;
     private int SelectedBatchSize() => int.TryParse(BatchSizeChoice.SelectedValue as string, out int n) ? Math.Clamp(n, 1, 80) : 30;
     private bool SelectedFastMode() => (SpeedMode.SelectedValue as string) == "fast";
+    private bool SelectedSmartMode() => (SpeedMode.SelectedValue as string) is null or "smart";
 
     private Dictionary<int, AgentTarget>? ReadWorkerTargets()
     {
@@ -413,7 +414,8 @@ public partial class MainWindow
         SupervisorProfile: (SupervisorProfileInput.SelectedValue as string ?? "").Trim(),
         TranslatorProfile: (TranslatorProfileInput.SelectedValue as string ?? "").Trim(),
         ReviewerProfile: (ReviewerProfileInput.SelectedValue as string ?? "").Trim(),
-        WorkerTargets: ReadWorkerTargets());
+        WorkerTargets: ReadWorkerTargets(),
+        SmartReview: SelectedSmartMode() && !SelectedFastMode() && !reviewDrafts);
 
     private void ToggleConnectionPanel(object sender, RoutedEventArgs e)
     {
@@ -634,14 +636,16 @@ public partial class MainWindow
             var supTarget = TranslationTeam.ResolveAssignment(activeSettings, options, profiles, 0, "supervisor");
             var sup = new AgentRow
             {
-                WorkerId = 0, AgentName = "المشرف", Role = "تخطيط وتوزيع",
+                WorkerId = 0, AgentName = "بوت الكشّاف", Role = "بناء العالم والمسرد",
                 ModelLabel = FormatModelBadge(supTarget.Profile, supTarget.Model),
-                Stage = "جاهز", Detail = "ينتظر بدء التخطيط"
+                Stage = "جاهز", Detail = "ينتظر تحليل مصطلحات اللعبة…"
             };
             liveAgents.Add(sup);
             agentByWorker[0] = sup;
         }
-        string defaultRole = plan.Settings.ReviewDrafts ? "مراجع AI" : fastMode ? "مترجم سريع" : "مترجم + مراجع";
+        string defaultRole = plan.Settings.ReviewDrafts ? "مدقق مسودات"
+            : fastMode ? "بوت مترجم متسلسل"
+            : activeSettings.SmartReview ? "بوت مشهدي + مدقق ذكي" : "مترجم + مدقق شامل";
         string initialRoleKey = plan.Settings.ReviewDrafts ? "reviewer" : "translator";
         for (int i = 1; i <= workers; i++)
         {
@@ -650,7 +654,7 @@ public partial class MainWindow
             {
                 WorkerId = i, AgentName = $"وكيل #{i}", Role = defaultRole,
                 ModelLabel = FormatModelBadge(target.Profile, target.Model),
-                Stage = "جاهز", Detail = "ينتظر سحب أول دفعة…"
+                Stage = "جاهز", Detail = "ينتظر استلام مسار مشهدي متصل…"
             };
             liveAgents.Add(row);
             agentByWorker[i] = row;
@@ -658,8 +662,11 @@ public partial class MainWindow
 
         LiveMonitorTitle.Text = plan.Settings.ReviewDrafts
             ? "الوكلاء يراجعون المسودات الآن…"
-            : fastMode ? "المترجمون المتوازون يعملون الآن (وضع سريع)…" : "فريق الترجمة والمراجعة يعمل الآن…";
-        LiveModeBadge.Text = plan.Settings.ReviewDrafts ? "مراجعة مسودات" : fastMode ? "وضع سريع" : "فريق كامل";
+            : fastMode ? "البوتات تعمل الآن (وضع سريع متسلسل)…"
+            : activeSettings.SmartReview ? "البوتات الذكية المترابطة تعمل الآن…" : "فريق الترجمة والمراجعة الشاملة يعمل الآن…";
+        LiveModeBadge.Text = plan.Settings.ReviewDrafts ? "مراجعة مسودات"
+            : fastMode ? "وضع سريع"
+            : activeSettings.SmartReview ? "بوتات ذكية مترابطة" : "مراجعة شاملة";
         LiveActiveAgentsText.Text = $"{workers} / {workers}";
         LiveProgressBar.Value = 0;
         LiveProgressText.Text = $"0 / {plan.Batches.Length:N0} دفعة (0.0%)";
@@ -732,7 +739,7 @@ public partial class MainWindow
                     if (preview.ChangedFiles.Count > 0)
                     {
                         output = service.Build(Path.Combine(path, "outputs", "team-" + Guid.NewGuid().ToString("N")),
-                            password: password, cancellation: cancellation, reviewed: preview).Directory;
+                            password: password, cancellation: cancellation, reviewed: preview, overlayOnly: true).Directory;
                         project.LastOutput = output;
                     }
                 }
@@ -877,7 +884,8 @@ public partial class MainWindow
         LiveActiveAgentsText.Text = "0";
         LiveModeBadge.Text = plan == null ? "—"
             : plan.Settings.ReviewDrafts ? "مراجعة مسودات"
-            : plan.Settings.FastMode ? "وضع سريع" : "فريق كامل";
+            : plan.Settings.FastMode ? "وضع سريع"
+            : plan.Settings.SmartReview ? "بوتات ذكية مترابطة" : "مراجعة شاملة";
         TeamNotesButton.Content = notesCount > 0 ? $"ملاحظات الفريق ({notesCount})" : "ملاحظات الفريق";
 
         bool canResume = progress.Completed < progress.Total;

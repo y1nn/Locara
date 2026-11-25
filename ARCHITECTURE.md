@@ -1,15 +1,15 @@
 # Locara Architecture
 
-Locara is a local-first PC-game Arabic localization workbench built on **.NET 10** (`net10.0` core/CLI/tests, `net10.0-windows` WPF desktop). Projects are stored locally in self-contained folders backed by SQLite WAL (`project.db`, Schema v5).
+Locara is a local-first PC-game Arabic localization workbench built on **.NET 10** (`net10.0` core/CLI/tests, `net10.0-windows` WPF desktop). Projects are stored locally in self-contained folders backed by SQLite WAL (`project.db`, Schema v6).
 
 ## 1. Solution Layout
 
 | Project | Target | Role |
 |---|---|---|
-| `src/Locara.Core` | `net10.0` | Format provider registry, engine detection, container & binary codecs, Arabic shaping/wrapping/font patching, file quality filtering & AI Scout, SQLite store, AI translation runner & multi-agent team, installer & Steam trial manager |
+| `src/Locara.Core` | `net10.0` | Format provider registry, engine detection, container & binary codecs, Arabic shaping/wrapping/font patching, file quality filtering & AI Scout, SQLite store, stateful AI translation bots, installer & Steam trial manager |
 | `src/Locara.Desktop` | `net10.0-windows` | Arabic RTL WPF desktop app (`MainWindow` split by feature partials) and Windows Credential Manager integration |
 | `src/Locara.Cli` | `net10.0` | Headless CLI (`scan`, `aes-key`, `files`, `clusters`, `scout`, `advice`, `translate`, `build`, `export-xunity`, `install`, `restore`, etc.) |
-| `checks/Locara.Checks` | `net10.0` | xUnit test suite (`95` tests) |
+| `checks/Locara.Checks` | `net10.0` | xUnit test suite (`103` tests) |
 
 Build settings (`Directory.Build.props`, `global.json`, `.github/workflows/ci.yml`):
 - .NET SDK `10.0.404` (`rollForward: latestPatch`), `Nullable=enable`, `TreatWarningsAsErrors=true`, `RestorePackagesWithLockFile=true`.
@@ -18,7 +18,7 @@ Build settings (`Directory.Build.props`, `global.json`, `.github/workflows/ci.ym
 ## 2. Project Storage (`project.db`)
 
 Each `.locara` project folder contains:
-- `project.db` (SQLite WAL, `user_version = 5`): `settings`, `sources`, `files`, `units`, `glossary`, `attempts`, `team_runs`, `team_batches`, `team_notes`, `usage_ledger`.
+- `project.db` (SQLite WAL, `user_version = 6`): `settings`, `sources`, `files`, `units`, `glossary`, `bot_glossary`, `attempts`, `team_runs`, `team_batches`, `team_notes`, `usage_ledger`.
 - `outputs/` — preview/final builds and XUnity exports.
 - `backups/` — SHA-256 verified originals for in-place installation and one-click restore.
 - `team-live.log` — per-batch AI team execution log.
@@ -41,7 +41,7 @@ Typed access to `settings` goes through `ProjectSettings.cs`. User settings live
 - **Arabic Display (`ArabicTextEngine.cs`, `StarTruckerDisplay.cs`, `ArabicFontCatalog.cs`):**
   - Uses Windows native `icu.dll` for Arabic contextual shaping and UAX #9 BiDi ordering, paired with tag-safe dynamic-programming wrapping (keeping `<nobr>`, `<link>`, `<a>`, and BBCode spans intact) and bundled SIL OFL 1.1 fonts.
 
-- **Filtering, AI Translation & Deployment (`FieldSemantics.cs`, `TextQualityClassifier.cs`, `SchemaClusterer.cs`, `LocalizationScout.cs`, `DeploymentAdvisor.cs`, `Translation.cs`, `TranslationTeam.cs`, `PackageInstaller.cs`, `SteamGameTrial.cs`):**
+- **Filtering, Stateful AI Bots & Deployment (`FieldSemantics.cs`, `TextQualityClassifier.cs`, `SchemaClusterer.cs`, `LocalizationScout.cs`, `DeploymentAdvisor.cs`, `Translation.cs`, `TranslationBots.cs`, `TranslationTeam.cs`, `PackageInstaller.cs`, `SteamGameTrial.cs`):**
   - Classifies files/fields locally, optionally runs token-budgeted schema analysis via AI Scout, and advises on engine-specific delivery.
-  - Masks placeholders/tags before AI requests, supports up to 16 parallel team workers with per-role/worker routing, resilient JSON salvage, and automatic retries for transient network errors.
+  - Masks placeholders/tags before AI requests and runs an autonomous 3-bot pipeline: `GameTermMiner` + `Lore & Glossary Bot` (builds `world_brief` and `bot_glossary`), `SceneLaneBuilder` + `SceneSessionState` (contiguous scene lanes with bounded multi-turn `ChatTurn[]` history, rolling `previousLines`/`upcomingLines`, live cross-bot term sharing, and static prefix prompt caching), and `SmartQaEvaluator` (skips external QA calls on clean short UI labels while routing narrative/ambiguous lines to the contextual QA Bot).
   - Verifies every in-place install and Steam trial with SHA-256 checksums, external-update detection, and crash-recovery journals.

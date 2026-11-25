@@ -190,9 +190,10 @@
          </StackPanel>
          <StackPanel Margin="0,0,12,0">
           <TextBlock Text="أسلوب العمل" FontSize="12" Foreground="#4D6468"/>
-          <ComboBox x:Name="SpeedMode" Width="280" SelectedIndex="0" SelectedValuePath="Tag">
-           <ComboBoxItem Content="فريق كامل (ترجمة + مراجعة AI + تصحيح)" Tag="team"/>
-           <ComboBoxItem Content="وضع سريع (مترجمون متوازون + فحص محلي)" Tag="fast"/>
+          <ComboBox x:Name="SpeedMode" Width="305" SelectedIndex="0" SelectedValuePath="Tag">
+           <ComboBoxItem Content="بوتات ذكية مترابطة (موصى به — سياق + مسرد تلقائي)" Tag="smart"/>
+           <ComboBoxItem Content="مراجعة شاملة (مترجم + مدقق لكل سطر)" Tag="team"/>
+           <ComboBoxItem Content="وضع سريع (ترجمة متسلسلة + فحص محلي)" Tag="fast"/>
           </ComboBox>
          </StackPanel>
          <StackPanel Margin="0,0,12,0">
