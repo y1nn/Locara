@@ -9,10 +9,11 @@ namespace Locara.Desktop;
 
 public partial class MainWindow
 {
-    private enum NextAction { Source, Scan, Files, Templates, Issues, Drafts, Translate, ResumeTeam, ResumeBatch, Trial, Build }
+    private enum NextAction { Source, Scan, Files, Templates, Issues, Drafts, Translate, ResumeTeam, ResumeBatch, Trial, Deploy }
     private NextAction nextAction;
     private SourceCapability? capability;
     private (string Path, string Scan)? capabilityKey;
+    private bool routeOnProjectOpen;
 
     private int overviewRequest;
     private bool loadingOverview;
@@ -20,10 +21,18 @@ public partial class MainWindow
 
     private void NavigateWorkspace(object sender, SelectionChangedEventArgs e)
     {
-        if (!IsLoaded || openingProject || work != null || projectPath == null || e.Source != Tabs) return;
-        if (e.RemovedItems.Contains(EditorPage) && !SaveEdits()) { Tabs.SelectedItem = EditorPage; return; }
-        if (Overview.IsSelected || TranslationPage.IsSelected) UpdateOverview();
+        if (!IsLoaded || openingProject || e.Source != Tabs) return;
+        if (work == null && projectPath != null && e.RemovedItems.Contains(EditorPage) && !SaveEdits())
+        {
+            Tabs.SelectedItem = EditorPage;
+            SyncNavRailSelection();
+            return;
+        }
+        SyncNavRailSelection();
+        if (work != null || projectPath == null) return;
+        if (FilesPage.IsSelected || TranslationPage.IsSelected || SettingsPage.IsSelected) UpdateOverview();
         if (FilesPage.IsSelected) RefreshScannedFiles();
+        if (PackagesPage.IsSelected) RefreshDirectInstallStatus();
     }
 
     private void SetCapabilities(SourceCapability result, string version)
@@ -76,7 +85,7 @@ public partial class MainWindow
     private async void UpdateOverview(bool includeSections = false)
     {
         overviewRequest++;
-        loadOverviewSections = includeSections || SectionsPanel.IsExpanded;
+        loadOverviewSections = includeSections || (BotTabSections?.IsChecked == true);
         if (loadingOverview || projectPath == null) return;
         loadingOverview = true;
         try
@@ -112,39 +121,64 @@ public partial class MainWindow
         int total = counts["total"], approved = counts["approved"], issues = counts["issues"],
             drafts = counts["review"], pending = counts["pending"];
         DashboardName.Text = data.Info.Name;
-        PendingCount.Content = $"بانتظار الترجمة  {pending:N0}";
-        DraftCount.Content = $"للمراجعة  {drafts:N0}";
-        IssueCount.Content = $"تحتاج انتباهاً  {issues:N0}";
-        ApprovedCount.Content = $"معتمدة  {approved:N0}";
+        PendingCount.Content = $"معلّق {pending:N0}";
+        DraftCount.Content = $"مسودات {drafts:N0}";
+        IssueCount.Content = $"تنبيهات {issues:N0}";
+        ApprovedCount.Content = $"معتمدة {approved:N0}";
 
         double pct = total == 0 ? 0 : approved * 100.0 / total;
         ApprovalProgress.Value = pct;
-        ApprovalPercent.Text = total == 0 ? "" : $"{approved:N0} / {total:N0} معتمدة ({pct:0.0}%)";
+        ApprovalPercent.Text = total == 0 ? "" : $"{approved:N0} / {total:N0} ({pct:0.0}%)";
+
+        if (work == null)
+        {
+            NavTranslation.Tag = data.Progress != null && data.Progress.Completed < data.Progress.Total
+                ? "استئناف"
+                : pending > 0 ? $"{pending:N0}" : "";
+        }
+        NavEditor.Tag = issues > 0 ? $"! {issues:N0}" : drafts > 0 ? $"{drafts:N0}" : total > 0 ? $"{total:N0}" : "";
+
+        if (ScanFilesPrimaryBtn != null)
+        {
+            ScanFilesPrimaryBtn.Content = !data.Scanned ? "افحص ملفات اللعبة" : "إعادة فحص الملفات";
+            ScanFilesPrimaryBtn.Style = (Style)FindResource(!data.Scanned ? "PrimaryButtonStyle" : typeof(Button));
+        }
 
         DraftsActionPanel.Visibility = drafts > 0 ? Visibility.Visible : Visibility.Collapsed;
-        DraftsActionTitle.Text = $"لديك {drafts:N0} مسودة بانتظار المراجعة والاعتماد";
+        DraftsActionTitle.Text = $"لديك {drafts:N0} مسودة جاهزة للتدقيق أو الاعتماد";
         ApproveTeamDraftsButton.Visibility = drafts > 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        ScanSummary.Text = !data.Scanned ? "بانتظار فحص المصدر" : data.Errors ? "ظهرت أخطاء في الفحص. راجع تبويب الملفات."
-            : $"اكتمل الفحص · {total:N0} نص";
+        ScanSummary.Text = !data.Scanned ? "بانتظار فحص المصدر" : data.Errors ? "ظهرت تنبيهات في الفحص — راجع الملفات"
+            : $"{total:N0} نص قابل للتعريب";
         packagePath = data.Output;
         OpenLatest.IsEnabled = packagePath != null;
         DashboardPreview.IsEnabled = data.Scanned && !data.Errors && (drafts > 0 || approved > 0);
         OutputSummary.Text = packagePath == null ? "لم تُبنَ حزمة لهذا المصدر بعد." : "آخر حزمة محفوظة:  " + Path.GetFileName(packagePath);
-        SectionsPanel.Visibility = data.Progress == null ? Visibility.Collapsed : Visibility.Visible;
         SectionList.ItemsSource = data.Sections ?? Array.Empty<string>();
         RefreshProviderSummary();
         OverviewTeam.Text = SavedTeamSummary.Text = data.Progress == null ? "" : FormatTeamStatus(data.Progress);
         ApplyProjectUsage(data.Usage);
-        ScopeSummary.Text = $"نطاق المحرّر الحالي: {(Search.Text.Length == 0 ? "كل النصوص" : Search.Text)} · {((ComboBoxItem)ReviewFilter.SelectedItem).Content}";
         if (work == null) UpdateIdleMonitor(data.Progress, data.NotesCount, data.Plan);
 
         nextAction = data.Info.Source.Length == 0 ? NextAction.Source : !data.Scanned ? NextAction.Scan : data.Errors ? NextAction.Files
             : issues > 0 ? NextAction.Issues : data.Progress is { } progress && progress.Completed < progress.Total ? NextAction.ResumeTeam
             : pending > 0 ? NextAction.Translate : drafts > 0 ? NextAction.Drafts : data.ResumeBatch ? NextAction.ResumeBatch
-            : approved > 0 ? NextAction.Build : NextAction.Files;
+            : approved > 0 ? NextAction.Deploy : NextAction.Files;
         Primary.IsEnabled = true;
         PresentCapability(data.Engine);
+
+        if (routeOnProjectOpen)
+        {
+            routeOnProjectOpen = false;
+            TabItem targetStage = !data.Scanned || data.Errors ? FilesPage
+                : (data.Progress != null && data.Progress.Completed < data.Progress.Total) || pending > 0 ? TranslationPage
+                : issues > 0 || drafts > 0 ? EditorPage
+                : approved > 0 ? PackagesPage
+                : FilesPage;
+            SelectStage(targetStage);
+        }
+
+        UpdateHeaderPrimaryVisibility();
         if (loadCapability && data.Scanned) LoadCapabilities(key, ZipPassword.Password);
     }
 
@@ -172,50 +206,71 @@ public partial class MainWindow
     {
         bool playable = capability?.Launch is GameLaunch.Steam or GameLaunch.GodotPack or GameLaunch.RenpyCopy;
         SetTrialVisibility(playable, capability?.Launch == GameLaunch.Steam, capability?.CanGenerateTemplates == true);
-        EngineSummary.Text = capability != null ? $"{capability.Engine}  {capability.Version}".Trim()
-            : engine.Length == 0 ? "المصدر بانتظار التعرّف" : engine;
+        EngineSummary.Text = capability != null ? $"{capability.Engine} {capability.Version}".Trim()
+            : engine.Length == 0 ? "قيد التعرّف" : engine;
         DeploymentSummary.Text = capability == null ? "" : capability.Deployment + (capability.Arabic.Length > 0 ? "\n" + capability.Arabic : "");
+        ScanSummary.ToolTip = string.IsNullOrWhiteSpace(DeploymentSummary.Text) ? null : DeploymentSummary.Text;
         if (nextAction == NextAction.Files && capability?.CanGenerateTemplates == true) nextAction = NextAction.Templates;
-        if (nextAction == NextAction.Build && playable) nextAction = NextAction.Trial;
         Primary.Content = nextAction switch
         {
-            NextAction.Source => "اختيار مصدر",
-            NextAction.Scan => "فحص المصدر",
-            NextAction.Files => "مراجعة الملفات",
-            NextAction.Templates => "توليد قوالب العربية",
-            NextAction.Issues => "راجع النصوص التي تحتاج انتباهاً",
-            NextAction.Drafts => "مراجعة المسودات بالذكاء الاصطناعي",
-            NextAction.Translate => "ابدأ تعريب النصوص المتبقية",
-            NextAction.ResumeTeam => "استأنف التشغيل المحفوظ",
-            NextAction.ResumeBatch => "استأنف الدفعة",
-            NextAction.Trial => "جرّب داخل اللعبة",
-            _ => "بناء حزمة نهائية"
+            NextAction.Source => "اختيار المصدر ←",
+            NextAction.Scan => "فحص المصدر ←",
+            NextAction.Files => "مراجعة الملفات ←",
+            NextAction.Templates => "توليد قوالب العربية ←",
+            NextAction.Issues => "مراجعة التنبيهات ←",
+            NextAction.Drafts => "تدقيق المسودات بالبوت ←",
+            NextAction.Translate => "تشغيل البوتات ←",
+            NextAction.ResumeTeam => "استئناف البوتات ←",
+            NextAction.ResumeBatch => "استئناف الدفعة ←",
+            NextAction.Trial => "جرّب داخل اللعبة ←",
+            _ => "الخط والتثبيت داخل اللعبة ←"
         };
+        UpdateHeaderPrimaryVisibility();
     }
 
     private async void PrimaryAction(object sender, RoutedEventArgs e)
     {
         switch (nextAction)
         {
-            case NextAction.Scan: await ScanCurrent(); break;
-            case NextAction.Templates: await GenerateRenpyCore(); break;
-            case NextAction.Issues: await OpenEditorFilter("issues"); break;
-            case NextAction.Drafts: await ReviewDraftsWithAiCore(); break;
+            case NextAction.Scan:
+                SelectStage(FilesPage);
+                await ScanCurrent();
+                break;
+            case NextAction.Templates:
+                SelectStage(FilesPage);
+                await GenerateRenpyCore();
+                break;
+            case NextAction.Issues:
+                await OpenEditorFilter("issues");
+                break;
+            case NextAction.Drafts:
+                await ReviewDraftsWithAiCore();
+                break;
             case NextAction.Translate:
-                Tabs.SelectedItem = TranslationPage;
-                if (!File.Exists(ProviderSettingsPath) && Model.Text.Length == 0 && ApiKey.Password.Length == 0)
-                    ConnectionPanel.IsExpanded = true;
+                SelectStage(TranslationPage);
+                if (!File.Exists(ProviderProfilesPath) && !File.Exists(ProviderSettingsPath) && Model.Text.Length == 0 && ApiKey.Password.Length == 0)
+                    OpenConnectionSettings();
                 else
                 {
                     TranslationMode.SelectedValue = "all-pending";
                     await StartUnifiedTranslationCore();
                 }
                 break;
-            case NextAction.ResumeTeam: await ResumeTeamQuickCore(); break;
-            case NextAction.ResumeBatch: await Translate(resume: true); break;
-            case NextAction.Trial: await TryGameCore(); break;
-            case NextAction.Build: Tabs.SelectedItem = PackagesPage; await Build(true); break;
-            default: Tabs.SelectedItem = FilesPage; break;
+            case NextAction.ResumeTeam:
+                await ResumeTeamQuickCore();
+                break;
+            case NextAction.ResumeBatch:
+                await Translate(resume: true);
+                break;
+            case NextAction.Trial:
+                await TryGameCore();
+                break;
+            case NextAction.Deploy:
+                SelectStage(PackagesPage);
+                break;
+            default:
+                SelectStage(FilesPage);
+                break;
         }
     }
 
@@ -246,6 +301,7 @@ public partial class MainWindow
         {
             Search.Text = view.Search;
             ReviewFilter.SelectedValue = view.Filter;
+            SyncEditorFilterChips(view.Filter);
             offset = view.Offset;
         }
         finally { settingProject = false; }
@@ -255,7 +311,7 @@ public partial class MainWindow
     {
         if (!SaveEdits()) return false;
         ApplyEditorView(new(search, filter, 0));
-        Tabs.SelectedItem = EditorPage;
+        SelectStage(EditorPage);
         await RefreshRows(rememberView: true);
         if (Rows.IsEnabled && Rows.Items.Count > 0 && Tabs.SelectedItem == EditorPage) Rows.SelectedIndex = 0;
         return true;
@@ -264,18 +320,18 @@ public partial class MainWindow
     private void ShowSections(object sender, RoutedEventArgs e) => UpdateOverview(includeSections: true);
 
     private async void OpenStatus(object sender, RoutedEventArgs e) => await OpenEditorFilter((string)((Button)sender).Tag);
-    private void GoEditor(object sender, RoutedEventArgs e) => Tabs.SelectedItem = EditorPage;
-    private void GoFiles(object sender, RoutedEventArgs e) => Tabs.SelectedItem = FilesPage;
-    private void GoTranslation(object sender, RoutedEventArgs e) => Tabs.SelectedItem = TranslationPage;
+    private void GoEditor(object sender, RoutedEventArgs e) => SelectStage(EditorPage);
+    private void GoFiles(object sender, RoutedEventArgs e) => SelectStage(FilesPage);
+    private void GoTranslation(object sender, RoutedEventArgs e) => SelectStage(TranslationPage);
     private async void PreviewFromProject(object sender, RoutedEventArgs e)
     {
-        Tabs.SelectedItem = PackagesPage;
+        SelectStage(PackagesPage);
         await Build(false);
     }
-    private void GoPackages(object sender, RoutedEventArgs e) => Tabs.SelectedItem = PackagesPage;
+    private void GoPackages(object sender, RoutedEventArgs e) => SelectStage(PackagesPage);
     private async void ClearScope(object sender, RoutedEventArgs e)
     {
-        if (await OpenEditorFilter("") && Tabs.SelectedItem == EditorPage) Tabs.SelectedItem = TranslationPage;
+        if (await OpenEditorFilter("") && Tabs.SelectedItem == EditorPage) SelectStage(TranslationPage);
     }
     private void SearchKey(object sender, KeyEventArgs e)
     {

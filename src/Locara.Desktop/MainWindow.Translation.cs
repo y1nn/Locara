@@ -21,7 +21,7 @@ public partial class MainWindow
         string Region, string? CertificateSha256 = null, bool JsonMode = false, string[]? CachedModels = null);
 
     private sealed record ProviderProfilesFile(string ActiveProfileId, int MaxCharacters, int MaxRequests,
-        List<SavedProviderProfile> Profiles);
+        List<SavedProviderProfile> Profiles, bool UnlimitedBudget = true);
 
     private bool loadingProfile;
     private List<SavedProviderProfile> savedProfiles = [];
@@ -59,16 +59,19 @@ public partial class MainWindow
                     ? loaded.ActiveProfileId : savedProfiles[0].Id;
                 CharacterBudget.Text = (loaded.MaxCharacters > 0 ? loaded.MaxCharacters : 500000).ToString();
                 RequestBudget.Text = (loaded.MaxRequests > 0 ? loaded.MaxRequests : 500).ToString();
+                if (UnlimitedBudget != null) UnlimitedBudget.IsChecked = loaded.UnlimitedBudget;
             }
             else
             {
                 savedProfiles = [new SavedProviderProfile("default", "الافتراضي", "openai-compatible", "", null, "")];
                 activeProfileId = "default";
+                if (UnlimitedBudget != null) UnlimitedBudget.IsChecked = true;
             }
 
             BindProfileSelector();
             ApplyProfileToUi(ActiveProfile);
             RefreshRoutingOptions();
+            UpdateBudgetCapBadge();
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -191,7 +194,8 @@ public partial class MainWindow
         {
             int cBudget = int.TryParse(CharacterBudget.Text, out int c) && c > 0 ? c : 500000;
             int rBudget = int.TryParse(RequestBudget.Text, out int r) && r > 0 ? r : 500;
-            var file = new ProviderProfilesFile(activeProfileId, cBudget, rBudget, savedProfiles);
+            bool unlimited = UnlimitedBudget?.IsChecked != false;
+            var file = new ProviderProfilesFile(activeProfileId, cBudget, rBudget, savedProfiles, unlimited);
             WriteProviderSetting(ProviderProfilesPath, JsonSerializer.Serialize(file));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
@@ -423,7 +427,6 @@ public partial class MainWindow
             ProfileNameInput.Text = profileName;
             RefreshRoutingOptions();
             RefreshProviderSummary();
-            ConnectionPanel.IsExpanded = false;
             Status.Text = $"حُفظ ملف الاتصال «{profileName}».";
         }
         catch (Exception error) { Status.Text = error.Message; }
@@ -446,6 +449,7 @@ public partial class MainWindow
 
     private void ChangeReviewFilter(object sender, SelectionChangedEventArgs e)
     {
+        SyncEditorFilterChips(ReviewStatus);
         if (IsLoaded && !settingProject) SearchRows(sender, e);
     }
 
@@ -486,7 +490,7 @@ public partial class MainWindow
         if (projectPath is not { } path || !SaveEdits()) return;
         ProviderOptions options;
         try { options = ReadProvider(); }
-        catch (Exception error) { Tabs.SelectedItem = TranslationPage; ConnectionPanel.IsExpanded = true; Status.Text = error.Message; return; }
+        catch (Exception error) { OpenConnectionSettings(); Status.Text = error.Message; return; }
 
         TranslationJob job;
         (int Units, int Characters) estimate;
@@ -553,9 +557,9 @@ public partial class MainWindow
             {
                 packagePath = build.Directory;
                 BuildLog.Text = $"المعاينة جاهزة — {build.Translations} ترجمة\n{build.Directory}";
-                Tabs.SelectedItem = PackagesPage;
+                SelectStage(PackagesPage);
             }
-            else Tabs.SelectedItem = EditorPage;
+            else SelectStage(EditorPage);
         });
     }
 
@@ -565,7 +569,7 @@ public partial class MainWindow
         { Status.Text = "حدّد سطراً واحداً لإعادة ترجمته."; return; }
         ProviderOptions options;
         try { options = ReadProvider(); }
-        catch (Exception error) { Tabs.SelectedItem = TranslationPage; ConnectionPanel.IsExpanded = true; Status.Text = error.Message; return; }
+        catch (Exception error) { OpenConnectionSettings(); Status.Text = error.Message; return; }
         var endpoint = ApiProvider.ResolveEndpoint(options);
         if (MessageBox.Show(this, $"إرسال سطر واحد ({row.Source.Length} حرفاً) إلى {endpoint.Authority}؟",
             "طلب مقترح جديد", MessageBoxButton.OKCancel, MessageBoxImage.Question, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
@@ -615,8 +619,8 @@ public partial class MainWindow
             TermSource.Text = row.Source;
             TermTarget.Text = "";
         }
-        Tabs.SelectedItem = TranslationPage;
-        GlossaryPanel.IsExpanded = true;
+        SelectStage(TranslationPage);
+        BotTabLore.IsChecked = true;
         TermSource.Focus();
         TermSource.SelectAll();
     }

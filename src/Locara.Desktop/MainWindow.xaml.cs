@@ -31,9 +31,12 @@ public partial class MainWindow:Window
         Height = Math.Min(Height, SystemParameters.WorkArea.Height);
         Provider.SelectionChanged += (_, _) =>
         {
-            ModelPicker.Visibility = Selected(Provider) == "azure" ? Visibility.Collapsed : Visibility.Visible;
-            CertificateOptions.Visibility = Selected(Provider) == "openai-compatible" ? Visibility.Visible : Visibility.Collapsed;
-            JsonMode.Visibility = Selected(Provider) == "openai-compatible" ? Visibility.Visible : Visibility.Collapsed;
+            bool isAzure = Selected(Provider) == "azure";
+            bool isOpenAi = Selected(Provider) == "openai-compatible";
+            ModelPicker.Visibility = isAzure ? Visibility.Collapsed : Visibility.Visible;
+            if (AzureRegionPanel != null) AzureRegionPanel.Visibility = isAzure ? Visibility.Visible : Visibility.Collapsed;
+            CertificateOptions.Visibility = isOpenAi ? Visibility.Visible : Visibility.Collapsed;
+            JsonMode.Visibility = isOpenAi ? Visibility.Visible : Visibility.Collapsed;
             if (loadingProfile) return;
             ApiKey.Clear();
             ApiUrl.Clear();
@@ -59,11 +62,25 @@ public partial class MainWindow:Window
         LoadRecent();
         LoadProviderSettings();
         InitializeLiveMonitor();
+        InitializeStudioShell();
+        Loaded += (_, _) => SyncNavRailSelection();
         Loaded += async (_, _) => await RecoverTrial();
         Closed += (_, _) => recoveryLifetime.Cancel();
     }
     private static string Selected(ComboBox box)=>((ComboBoxItem)box.SelectedItem).Content.ToString()!;
-    private sealed record RecentProject(string Path, string Name);
+    private sealed record RecentProject(string Path, string Name, string SourceDisplay, string EngineBadge, double ProgressPercent, string StatsText)
+    {
+        public static RecentProject FromSummary(RecentProjectSummary s)
+        {
+            string src = !string.IsNullOrWhiteSpace(s.Source) ? s.Source : s.Path;
+            string badge = !string.IsNullOrWhiteSpace(s.Engine) ? s.Engine.ToUpperInvariant() : "مشروع";
+            double pct = s.TotalUnits > 0 ? s.CompletedUnits * 100.0 / s.TotalUnits : 0;
+            string stats = !s.Exists ? "المجلد غير متاح حالياً"
+                : s.TotalUnits == 0 ? "بانتظار فحص النصوص"
+                : $"{s.CompletedUnits:N0} / {s.TotalUnits:N0} معرّب ({s.ApprovedUnits:N0} معتمد)";
+            return new(s.Path, s.Name, src, badge, pct, stats);
+        }
+    }
     private IEnumerable<string> RecentPaths => RecentProjects.Items.OfType<RecentProject>().Select(item => item.Path);
     private async void LoadRecent()
     {
@@ -73,9 +90,14 @@ public partial class MainWindow:Window
             {
                 if (!File.Exists(recentPath)) return new List<RecentProject>();
                 var paths = JsonSerializer.Deserialize<List<string>>(File.ReadAllText(recentPath)) ?? [];
-                return paths.Take(15).Select(path => new RecentProject(path, ProjectStore.ReadName(path))).ToList();
+                return paths.Take(15).Select(path => RecentProject.FromSummary(ProjectStore.ReadRecentSummary(path))).ToList();
             });
-            if (projectPath == null && !openingProject) RecentProjects.ItemsSource = recent;
+            if (projectPath == null && !openingProject)
+            {
+                RecentProjects.ItemsSource = recent;
+                if (RecentEmptyHint != null)
+                    RecentEmptyHint.Visibility = recent.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
         { Status.Text = "تعذرت قراءة قائمة المشاريع الحديثة."; }
@@ -96,9 +118,16 @@ public partial class MainWindow:Window
                 var view = ReadEditorView(project, info.Source);
                 var projSettings = new ProjectSettings(project);
                 var unityDisplay = projSettings.ResolveUnityDisplayOptions();
+                var team = new TranslationTeam(project);
+                string worldBrief = team.Latest is { } lp ? team.WorldBrief(lp) : "";
+                var botEntries = project.BotGlossaryEntries();
+                var summary = ProjectStore.ReadRecentSummary(project.DirectoryPath);
                 return (project.DirectoryPath, Info: info, View: view, Page: ReadEditorPage(project, view),
                     Terms: project.Glossary().OrderBy(pair => pair.Key).ToList(),
-                    TeamSettings: new TranslationTeam(project).Settings,
+                    BotEntries: botEntries,
+                    WorldBrief: worldBrief,
+                    Summary: summary,
+                    TeamSettings: team.Settings,
                     DisplayFont: projSettings.DisplayFont,
                     UnityWrap: unityDisplay.WrapMode,
                     UnityScale: unityDisplay.FontScale.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
@@ -124,10 +153,11 @@ public partial class MainWindow:Window
             DraftsActionPanel.Visibility = Visibility.Collapsed;
             OverviewTeam.Text = SavedTeamSummary.Text = OutputSummary.Text = DeploymentSummary.Text = EngineSummary.Text = "";
             ApprovalProgress.Value = 0;
-            SectionsPanel.Visibility = Visibility.Collapsed;
             liveAgents.Clear();
             agentByWorker.Clear();
             liveEvents.Clear();
+            liveSamples.Clear();
+            LiveSamplesEmptyText.Visibility = Visibility.Visible;
             LoadTeamRoleSettings(opened.TeamSettings);
             LoadDisplayFontSelector(opened.DisplayFont, opened.UnityWrap, opened.UnityScale, opened.UnityShaping, opened.UnityContrast);
             RefreshDirectInstallStatus();
@@ -144,16 +174,19 @@ public partial class MainWindow:Window
             ApplyEditorPage(opened.Page, opened.View.Offset);
             TermSource.Clear();
             TermTarget.Clear();
-            Terms.ItemsSource = opened.Terms;
-            Overview.IsEnabled = FilesPage.IsEnabled = EditorPage.IsEnabled = TranslationPage.IsEnabled = PackagesPage.IsEnabled = true;
-            Tabs.SelectedItem = Overview;
+            ApplyLoreAndGlossaryData(opened.WorldBrief, opened.BotEntries, opened.Terms);
+            FilesPage.IsEnabled = EditorPage.IsEnabled = TranslationPage.IsEnabled = PackagesPage.IsEnabled = true;
+            NavFiles.IsEnabled = NavTranslation.IsEnabled = NavEditor.IsEnabled = NavPackages.IsEnabled = true;
+            routeOnProjectOpen = true;
+            SelectStage(FilesPage);
             Status.Text = "فُتح المشروع.";
             UpdateOverview();
 
-            var recent = new[] { new RecentProject(opened.DirectoryPath, opened.Info.Name) }
+            var recent = new[] { RecentProject.FromSummary(opened.Summary) }
                 .Concat(RecentProjects.Items.OfType<RecentProject>())
                 .DistinctBy(item => item.Path, StringComparer.OrdinalIgnoreCase).Take(15).ToList();
             RecentProjects.ItemsSource = recent;
+            if (RecentEmptyHint != null) RecentEmptyHint.Visibility = recent.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             SaveRecent(recent);
             return true;
         }
@@ -231,6 +264,10 @@ public partial class MainWindow:Window
         scannedEngine = page.Engine;
         Rows.IsEnabled = true;
         PageInfo.Text = rows.Count == 0 ? "لا توجد نصوص" : $"الصفوف {pageOffset + 1}–{pageOffset + rows.Count}";
+        if (rows.Count > 0 && Rows.SelectedItem == null)
+            Rows.SelectedIndex = 0;
+        else
+            PopulateEditorInspector(Rows.SelectedItem as Unit);
     }
 
     private bool SaveEdits(Unit? selected = null, bool approve = false, bool approvePage = false, bool commit = true,
@@ -303,6 +340,7 @@ public partial class MainWindow:Window
         else
         {
             Tabs.IsEnabled = false;
+            SetStudioNavEnabled(enabled: false);
         }
         string previousStatus = Status.Text;
         try
@@ -326,10 +364,24 @@ public partial class MainWindow:Window
             work = null;
             Busy.Visibility = Visibility.Collapsed;
             if (keepTranslationInteractive) SetTranslationRunLock(running: false);
-            else Tabs.IsEnabled = true;
+            else { Tabs.IsEnabled = true; SetStudioNavEnabled(enabled: true); }
+            SyncSettingsProjectScope();
             await RefreshRows();
             UpdateOverview();
         }
+    }
+
+    private void SetStudioNavEnabled(bool enabled)
+    {
+        bool hasProj = projectPath != null;
+        NavLibrary.IsEnabled = enabled;
+        NavFiles.IsEnabled = enabled && hasProj;
+        NavTranslation.IsEnabled = enabled && hasProj;
+        NavEditor.IsEnabled = enabled && hasProj;
+        NavPackages.IsEnabled = enabled && hasProj;
+        NavSettings.IsEnabled = enabled;
+        HeaderNewButton.IsEnabled = enabled;
+        HeaderOpenButton.IsEnabled = enabled;
     }
 
     private void SetTranslationRunLock(bool running)
@@ -337,15 +389,19 @@ public partial class MainWindow:Window
         TranslationControlsPanel.IsEnabled = !running;
         ConnectionPanel.IsEnabled = !running;
         RoutingPanel.IsEnabled = !running;
-        RolesPanel.IsEnabled = !running;
-        BudgetPanel.IsEnabled = !running;
-        GlossaryPanel.IsEnabled = !running;
+        if (GlossaryEditControls != null) GlossaryEditControls.IsEnabled = !running;
+        if (ClearBotTermsBtn != null) ClearBotTermsBtn.IsEnabled = !running && botTermRows.Count > 0;
         HeaderNewButton.IsEnabled = !running;
         HeaderOpenButton.IsEnabled = !running;
+        NavLibrary.IsEnabled = !running;
+        NavFiles.IsEnabled = !running && projectPath != null;
+        NavEditor.IsEnabled = !running && projectPath != null;
+        NavPackages.IsEnabled = !running && projectPath != null;
+        NavSettings.IsEnabled = !running;
         StopTranslationButton.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
         foreach (TabItem tab in Tabs.Items)
         {
-            if (tab != TranslationPage) tab.IsEnabled = !running && (tab == Tabs.Items[0] || projectPath != null);
+            if (tab != TranslationPage) tab.IsEnabled = !running && (tab == LibraryPage || tab == SettingsPage || projectPath != null);
         }
     }
     private async void CreateProject(object sender,RoutedEventArgs e)
@@ -644,11 +700,14 @@ public partial class MainWindow:Window
             if (openEditor && scan.Units > 0)
             {
                 ApplyEditorView(result.View!);
-                Tabs.SelectedItem = File.Exists(SourcePath.Text) && result.Capability.Launch == GameLaunch.None ? EditorPage : Overview;
+                if (scan.Files == 1 && scan.Diagnostics.Count == 0)
+                    SelectStage(TranslationPage);
+                else
+                    SelectStage(FilesPage);
             }
             else if (openEditor && scan.Files > 0 && scan.Units == 0)
             {
-                Tabs.SelectedItem = FilesPage;
+                SelectStage(FilesPage);
             }
         });
     }

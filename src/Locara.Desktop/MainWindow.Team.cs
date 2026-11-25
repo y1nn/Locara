@@ -298,9 +298,11 @@ public partial class MainWindow
         if (ProviderSummary == null || Provider == null || Provider.SelectedItem == null) return;
         string providerName = Selected(Provider);
         string activeName = savedProfiles.Count > 0 ? ActiveProfile.Name : "الافتراضي";
-        string baseSummary = string.IsNullOrWhiteSpace(Model.Text)
-            ? $"الاتصال: {activeName} ({providerName}) — اختر نموذجاً من «إعداد المزوّد والـ API»"
-            : $"الاتصال: {activeName} ({providerName})  ·  النموذج: {Model.Text.Trim()}";
+        string baseSummary = string.IsNullOrWhiteSpace(Model.Text) && providerName != "azure"
+            ? $"⚠ إعداد الـ API: {activeName} ({providerName})"
+            : $"{activeName} · {Model.Text.Trim()}";
+        if (NavSettings != null)
+            NavSettings.Tag = string.IsNullOrWhiteSpace(Model.Text) && providerName != "azure" ? "!" : "";
 
         var overrides = new List<string>();
         string trP = TranslatorProfileInput?.SelectedValue as string ?? "";
@@ -417,15 +419,9 @@ public partial class MainWindow
         WorkerTargets: ReadWorkerTargets(),
         SmartReview: SelectedSmartMode() && !SelectedFastMode() && !reviewDrafts);
 
-    private void ToggleConnectionPanel(object sender, RoutedEventArgs e)
-    {
-        ConnectionPanel.IsExpanded = !ConnectionPanel.IsExpanded;
-    }
+    private void ToggleConnectionPanel(object sender, RoutedEventArgs e) => OpenConnectionSettings();
 
-    private void ToggleRoutingPanel(object sender, RoutedEventArgs e)
-    {
-        RoutingPanel.IsExpanded = !RoutingPanel.IsExpanded;
-    }
+    private void ToggleRoutingPanel(object sender, RoutedEventArgs e) => OpenRoutingSettings();
 
     private void SaveTeamRoleSettings(object sender, RoutedEventArgs e)
     {
@@ -556,8 +552,7 @@ public partial class MainWindow
         try { options = ReadProvider(); }
         catch (Exception error)
         {
-            Tabs.SelectedItem = TranslationPage;
-            ConnectionPanel.IsExpanded = true;
+            OpenConnectionSettings();
             Status.Text = error.Message;
             return;
         }
@@ -600,8 +595,7 @@ public partial class MainWindow
         try { options = ReadProvider(); }
         catch (Exception error)
         {
-            Tabs.SelectedItem = TranslationPage;
-            ConnectionPanel.IsExpanded = true;
+            OpenConnectionSettings();
             Status.Text = error.Message;
             return;
         }
@@ -629,6 +623,14 @@ public partial class MainWindow
         liveAgents.Clear();
         agentByWorker.Clear();
         liveEvents.Clear();
+        liveSamples.Clear();
+        LiveSamplesEmptyText.Visibility = Visibility.Visible;
+        if (NavTranslation != null) NavTranslation.Tag = "نشط ●";
+        if (LoreBotBadge != null)
+        {
+            LoreBotBadge.Text = !fastMode && plan.UseSupervisor ? "يحلّل الآن ●" : "مسرد محفوظ";
+            LoreBotBadge.Foreground = ResBrush("AccentIndicator");
+        }
 
         if (!fastMode && plan.UseSupervisor)
         {
@@ -751,8 +753,8 @@ public partial class MainWindow
                 ? "اكتمل التشغيل بنجاح"
                 : "توقّف التشغيل مع حفظ جميع الدفعات المكتملة";
             LiveActiveAgentsText.Text = $"0 / {workers}";
-            LiveNotesCountText.Text = $"ملاحظات: {result.notes}";
-            TeamNotesButton.Content = result.notes > 0 ? $"ملاحظات الفريق ({result.notes})" : "ملاحظات الفريق";
+            LiveNotesCountText.Text = $"ملاحظات التدقيق: {result.notes}";
+            TeamNotesButton.Content = result.notes > 0 ? $"ملاحظات المدقق ({result.notes})" : "ملاحظات المدقق";
             TeamStatus.Text = FormatTeamStatus(result.status) + (result.notes > 0 ? $" · ملاحظات {result.notes}" : "");
             Status.Text = result.status.Completed >= result.status.Total
                 ? $"اكتمل التشغيل — حُفظت {result.status.Saved:N0} ترجمة."
@@ -762,6 +764,7 @@ public partial class MainWindow
                 packagePath = result.output;
                 BuildLog.Text = "معاينة الفريق جاهزة\n" + result.output;
             }
+            _ = ReloadLoreAndGlossariesAsync();
         }, keepTranslationInteractive: true);
 
         if (!finishedNormally && IsLoaded && projectPath == path)
@@ -773,6 +776,7 @@ public partial class MainWindow
                 if (agent.Stage is not ("انتهى" or "مكتمل"))
                     agent.Stage = "متوقف";
             }
+            _ = ReloadLoreAndGlossariesAsync();
         }
     }
 
@@ -834,6 +838,13 @@ public partial class MainWindow
 
             int activeNow = liveAgents.Count(a => a.Stage is not ("انتهى" or "جاهز"));
             LiveActiveAgentsText.Text = $"{activeNow} / {workers}";
+            if (act.WorkerId == 0 && LoreBotBadge != null)
+            {
+                LoreBotBadge.Text = act.Stage;
+                LoreBotBadge.Foreground = ResBrush(act.Stage == "مكتمل" ? "SuccessFg" : "AccentIndicator");
+                if (LoreBotDetail != null) LoreBotDetail.Text = act.Detail;
+            }
+            AppendLiveSample(act.Section, act.SampleSource, act.SampleTarget);
             string modelTag = string.IsNullOrWhiteSpace(row.ModelLabel) ? "" : $" [{row.ModelLabel}]";
             AppendLiveEvent($"{act.Role}{modelTag} ← {act.Detail}");
         }
@@ -890,13 +901,8 @@ public partial class MainWindow
 
         bool canResume = progress.Completed < progress.Total;
         ResumeTeamPrimary.Visibility = canResume ? Visibility.Visible : Visibility.Collapsed;
-        StartTranslationPrimary.Content = canResume ? "بدء تشغيل جديد" : "ابدأ الترجمة الآن";
-        StartTranslationPrimary.Background = canResume
-            ? (System.Windows.Media.Brush)FindResource("AccentSoft")
-            : (System.Windows.Media.Brush)FindResource("Accent");
-        StartTranslationPrimary.Foreground = canResume
-            ? (System.Windows.Media.Brush)FindResource("Ink")
-            : System.Windows.Media.Brushes.White;
+        StartTranslationPrimary.Content = canResume ? "بدء جلسة جديدة" : "تشغيل البوتات الآن";
+        StartTranslationPrimary.Style = (Style)FindResource(canResume ? typeof(Button) : "PrimaryButtonStyle");
     }
 
     private static string FormatTeamStatus(TeamProgress value)

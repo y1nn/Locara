@@ -159,9 +159,7 @@ public partial class MainWindow
             byte[] bytes = ArabicFontCatalog.LoadBytes(choice);
             var compat = ArabicFontCatalog.Inspect(bytes);
             FontCompatibilityStatus.Text = $"[{choice.Category}]  {compat.Summary}";
-            FontCompatibilityStatus.Foreground = compat.FullyCompatible
-                ? new SolidColorBrush(Color.FromRgb(0x14, 0x63, 0x56))
-                : new SolidColorBrush(Color.FromRgb(0x9A, 0x5B, 0x00));
+            FontCompatibilityStatus.Foreground = ResBrush(compat.FullyCompatible ? "SuccessFg" : "WarningFg");
 
             string? previewPath = choice.FilePath;
             if (string.IsNullOrEmpty(previewPath))
@@ -184,7 +182,7 @@ public partial class MainWindow
         catch (Exception error)
         {
             FontCompatibilityStatus.Text = "تعذّرت معاينة الخط: " + error.Message;
-            FontCompatibilityStatus.Foreground = new SolidColorBrush(Color.FromRgb(0xA9, 0x32, 0x26));
+            FontCompatibilityStatus.Foreground = ResBrush("DangerFg");
         }
     }
 
