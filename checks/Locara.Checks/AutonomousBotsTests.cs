@@ -515,4 +515,189 @@ public sealed class AutonomousBotsTests
         Assert.True(resumedSawPersistedTail);
         Assert.True(resumedSawBotGlossary);
     }
+
+    [Fact]
+    public void HardeningFixesCoverGlossaryOverwriteUnicodeCollisionEnvelopeMinerSessionAndSmartQaEdgeCases()
+    {
+        using var ws = new TempWorkspace();
+
+        // 1. BotGlossary handles Unicode case-folding collisions in SQLite NOCASE without throwing,
+        //    and SaveBotTerms(overwrite: false) preserves Lore Bot canonical terms against worker guesses!
+        string dbDir = ws.PathOf("unicode-bot-glossary");
+        using (var store = ProjectStore.Create(dbDir, "UnicodeGlossary"))
+        {
+            store.Execute("INSERT INTO bot_glossary(source, target, note) VALUES('Élodie', 'إيلودي', 'lore-bot')");
+            store.Execute("INSERT INTO bot_glossary(source, target, note) VALUES('élodie', 'إيلوديا', 'translator-bot')");
+            var botMap = store.BotGlossary();
+            Assert.Single(botMap);
+
+            store.SaveBotTerms(new Dictionary<string, string> { ["Aether Core"] = "نواة الأثير" }, "lore-bot", overwrite: true);
+            store.SaveBotTerms(new Dictionary<string, string> { ["Aether Core"] = "قلب الأثير" }, "translator-bot", overwrite: false);
+            Assert.Equal("نواة الأثير", store.BotGlossary()["Aether Core"]);
+        }
+
+        var live = new LiveGlossary(null, new Dictionary<string, string> { ["Aether Core"] = "نواة الأثير" });
+        var rejectedOverwrite = live.TryAddBotTerms(new Dictionary<string, string> { ["Aether Core"] = "قلب الأثير" }, overwrite: false);
+        Assert.Empty(rejectedOverwrite);
+        Assert.Equal("نواة الأثير", live.ExportBotTerms()["Aether Core"]);
+
+        // 2. LiveGlossary.ContainsWholeTerm never throws on empty term
+        Assert.False(LiveGlossary.ContainsWholeTerm("Save Game", ""));
+
+        // 3. ReadTranslationsAndTermsPartial handles literal "translations"/"terms" keys, extra metadata, and nested data envelope
+        var literalIds = new[] { "translations", "terms" };
+        var litParsed = ApiProvider.ReadTranslationsAndTermsPartial(
+            """{"translations":{"translation":"الترجمات"},"terms":{"translation":"الشروط"}}""",
+            literalIds, out var litMissing, out var litNewTerms);
+        Assert.Empty(litMissing);
+        Assert.Empty(litNewTerms);
+        Assert.Equal("الترجمات", litParsed["translations"]);
+        Assert.Equal("الشروط", litParsed["terms"]);
+
+        var nestedParsed = ApiProvider.ReadTranslationsAndTermsPartial(
+            """{"data":{"translations":{"1":"مرحباً"},"newTerms":{"Citadel":"القلعة"}}}""",
+            ["1"], out var nestedMissing, out var nestedTerms);
+        Assert.Empty(nestedMissing);
+        Assert.Equal("مرحباً", nestedParsed["1"]);
+        Assert.Equal("القلعة", nestedTerms["Citadel"]);
+
+        var extraMetaParsed = ApiProvider.ReadTranslationsAndTermsPartial(
+            """{"1":"حفظ","data":{"note":"ignored"}}""",
+            ["1"], out var extraMissing, out _);
+        Assert.Empty(extraMissing);
+        Assert.Equal("حفظ", extraMetaParsed["1"]);
+
+        // 4. GameTermMiner ignores lowercase [item] context tags and {Player}/[Locked] placeholders
+        var noisyBatches = new[]
+        {
+            new TeamBatch(1, "ui.json",
+            [
+                new TeamRow("1", 1, "Hello {Player}, door is [Locked] in Shadow Vale", "[item]"),
+                new TeamRow("2", 1, "Beware {Player}, gate is [Locked] in Shadow Vale", "[item]"),
+                new TeamRow("3", 1, "Wait {Player}, chest is [Locked] in Shadow Vale", "[item]")
+            ])
+        };
+        var mined = GameTermMiner.ExtractRecurringTerms(noisyBatches);
+        Assert.Contains(mined, t => t.Term == "Shadow Vale");
+        Assert.DoesNotContain(mined, t => t.Term.Equals("item", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mined, t => t.Term.Equals("Player", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mined, t => t.Term.Equals("Locked", StringComparison.OrdinalIgnoreCase));
+
+        // 5. SmartQaEvaluator routes period-terminated sentences ("He lied."), mixed Latin+Arabic ("حفظ Game"), and missing 1-char glossary
+        Assert.True(SmartQaEvaluator.NeedsReview(new TeamRow("1", 1, "He lied.", ""), "لقد كذب.", null));
+        Assert.True(SmartQaEvaluator.NeedsReview(new TeamRow("2", 1, "Save Game", ""), "حفظ Game", null));
+        Assert.True(SmartQaEvaluator.NeedsReview(new TeamRow("3", 1, "Rank S", ""), "الرتبة الأولى",
+            new Dictionary<string, string> { ["S"] = "س" }));
+
+        // 6. SceneLaneBuilder splits a skewed [1 batch, 8 batches] multi-section project across 2 workers
+        var skewed = new List<TeamBatch> { new(1, "tiny_ui.json", [new TeamRow("u1", 1, "Play", "")]) };
+        for (int i = 2; i <= 9; i++)
+            skewed.Add(new(i, "huge_story.json", [new TeamRow($"s{i}", 1, $"Story {i}", "")]));
+        var skewedLanes = SceneLaneBuilder.BuildLanes(skewed, workers: 2, fastMode: false);
+        Assert.True(skewedLanes.Count(l => l.Section == "huge_story.json") >= 2);
+
+        // 7. Large 30-row narrative batch still records trailing multi-turn ChatTurn history under maxHistoryChars!
+        var session = new SceneSessionState(maxTurns: 2, maxHistoryChars: 2400, maxContextLines: 6);
+        var thirtyLines = Enumerable.Range(1, 30)
+            .Select(i => new ContextLine($"Narrative source sentence number {i} with rich world detail and dialogue.", $"جملة سردية مترجمة رقم {i} تحتوي تفاصيل غنية وحواراً متصلاً."))
+            .ToList();
+        session.RecordCompletedBatch(thirtyLines);
+        Assert.Equal(2, session.GetHistorySnapshot().Count); // 1 compact trailing user+assistant pair!
+    }
+
+    [Fact]
+    public async Task NormalizeHistoryReplacesUnpairedUserTurnMaskingPreservedOnCorrectAndCrossLaneResumeSeedsTail()
+    {
+        // 1. NormalizeAlternatingHistory pairs user2 with assistant2 when user1 had empty assistant reply
+        var messyHistory = new List<ChatTurn>
+        {
+            new("user", "STALE_USER_1"),
+            new("assistant", "   "),
+            new("user", "VALID_USER_2"),
+            new("assistant", "VALID_ASSISTANT_2")
+        };
+        string okReply = """{"choices":[{"message":{"content":"{\"1\":\"تم\"}"}}]}""";
+        var (_, sentBody) = await TestHelpers.CallLoopback(200, okReply, url =>
+            new ApiProvider(new("openai-compatible", "m", "k", url))
+                .RequestChatWithUsage("SYS", messyHistory, """{"1":"Go"}""", default));
+        Assert.DoesNotContain("STALE_USER_1", sentBody, StringComparison.Ordinal);
+        Assert.Contains("VALID_USER_2", sentBody, StringComparison.Ordinal);
+        Assert.Contains("VALID_ASSISTANT_2", sentBody, StringComparison.Ordinal);
+
+        // 2. Correction history keeps __LOCARA_0__ masked in assistant turn AND multi-worker cross-lane resume seeds previousLines!
+        using var ws = new TempWorkspace();
+        string source = ws.PathOf("cross-lane.json");
+        var rows = Enumerable.Range(1, 8).ToDictionary(i => $"k{i:00}", i => $"Greet {{0}} at step {i}!");
+        File.WriteAllText(source, JsonSerializer.Serialize(rows));
+
+        string proj = ws.PathOf("cross-lane-proj");
+        var opts = TestHelpers.ScopedOptions with { BatchSize = 2, MaxRequests = 4, MaxCharacters = 200_000 };
+        using (var store = ProjectStore.Create(proj, "CrossLane", source))
+        {
+            new ProjectService(store).Scan();
+            var team = new TranslationTeam(store);
+            // 4 batches across 2 workers -> Lane 1 = [1, 2], Lane 2 = [3, 4]. Run with 1 worker & MaxRequests=4 so batches 1 & 2 finish, 3 & 4 remain!
+            var plan = team.Capture(store.Units(), opts, new TeamSettings(Workers: 2, BatchSize: 2, FastMode: false));
+            var partial = await team.Run(plan, opts, null, send: (req, _) =>
+            {
+                using var doc = JsonDocument.Parse(req.Data);
+                var entries = doc.RootElement.GetProperty("entries").EnumerateArray().ToArray();
+                if (req.Role == "reviewer")
+                    return Task.FromResult(JsonSerializer.Serialize(entries.ToDictionary(e => e.GetProperty("id").GetString()!, _ => new { ok = true })));
+                return Task.FromResult(JsonSerializer.Serialize(entries.ToDictionary(
+                    e => e.GetProperty("id").GetString()!,
+                    _ => "رحّب بـ __LOCARA_0__ في الدفعة الثانية!")));
+            }, approveReviewed: true, overrideWorkers: 1);
+            Assert.Equal(2, partial.Completed); // Lane 1 ([1,2]) done; Lane 2 ([3,4]) untouched!
+        }
+
+        bool lane2SawBatch2Tail = false;
+        bool correctAssistantWasMasked = false;
+        using (var reopened = new ProjectStore(proj))
+        {
+            var team = new TranslationTeam(reopened);
+            bool rejectedOnce = false;
+            var finished = await team.Run(team.Latest!, opts with { MaxRequests = 20 }, null, send: (req, _) =>
+            {
+                using var doc = JsonDocument.Parse(req.Data);
+                var root = doc.RootElement;
+                var entries = root.GetProperty("entries").EnumerateArray().ToArray();
+                string stage = root.GetProperty("stage").GetString()!;
+
+                if (req.Role == "translator" && stage == "translate" && !lane2SawBatch2Tail)
+                {
+                    lane2SawBatch2Tail = root.TryGetProperty("previousLines", out var prev)
+                        && prev.GetRawText().Contains("في الدفعة الثانية", StringComparison.Ordinal);
+                }
+                if (req.Role == "translator" && stage == "correct")
+                {
+                    string assistantTurn = req.History?.LastOrDefault(h => h.Role == "assistant")?.Content ?? "";
+                    correctAssistantWasMasked = assistantTurn.Contains("__LOCARA_0__", StringComparison.Ordinal)
+                        && !assistantTurn.Contains("{0}", StringComparison.Ordinal);
+                }
+                if (req.Role == "reviewer")
+                {
+                    if (!rejectedOnce)
+                    {
+                        rejectedOnce = true;
+                        string firstId = entries[0].GetProperty("id").GetString()!;
+                        return Task.FromResult(JsonSerializer.Serialize(entries.ToDictionary(
+                            e => e.GetProperty("id").GetString()!,
+                            e => e.GetProperty("id").GetString() == firstId
+                                ? (object)new { ok = false, reason = "حسّن الصياغة", suggestion = "" }
+                                : new { ok = true })));
+                    }
+                    return Task.FromResult(JsonSerializer.Serialize(entries.ToDictionary(e => e.GetProperty("id").GetString()!, _ => new { ok = true })));
+                }
+                return Task.FromResult(JsonSerializer.Serialize(entries.ToDictionary(
+                    e => e.GetProperty("id").GetString()!,
+                    _ => "رحّب بـ __LOCARA_0__ الآن!")));
+            }, approveReviewed: true, overrideWorkers: 2);
+
+            Assert.Equal(4, finished.Completed);
+        }
+
+        Assert.True(lane2SawBatch2Tail);
+        Assert.True(correctAssistantWasMasked);
+    }
 }

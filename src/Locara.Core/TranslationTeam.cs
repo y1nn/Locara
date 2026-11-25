@@ -512,6 +512,7 @@ public sealed class TranslationTeam(ProjectStore store)
             return false;
         }
 
+        var batchById = plan.Batches.ToDictionary(b => b.Id);
         using var runCts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         Exception? fatalError = null;
         var workerTasks = Enumerable.Range(1, concurrency).Select(workerId => Task.Run(async () =>
@@ -530,11 +531,21 @@ public sealed class TranslationTeam(ProjectStore store)
                         runCts.Token.ThrowIfCancellationRequested();
                         if (ReadBatchStage(worker, plan.Id, batch.Id) == "complete")
                         {
-                            // Reconstruct rolling context tail from persisted completed batch so resumed runs stay contextual!
                             var savedTail = ReadBatchContextTail(worker, plan.Id, batch.Id, batch);
                             if (savedTail.Count > 0)
                                 laneSession.SeedContextTail(laneSession.GetContextTail().Concat(savedTail));
                             continue;
+                        }
+
+                        // Cross-lane resume continuity: if this lane starts mid-section and preceding batch is already complete, seed its tail!
+                        if (laneSession.GetContextTail().Count == 0
+                            && batchById.TryGetValue(batch.Id - 1, out var prevSecBatch)
+                            && prevSecBatch.Section == batch.Section
+                            && ReadBatchStage(worker, plan.Id, prevSecBatch.Id) == "complete")
+                        {
+                            var crossLaneTail = ReadBatchContextTail(worker, plan.Id, prevSecBatch.Id, prevSecBatch);
+                            if (crossLaneTail.Count > 0)
+                                laneSession.SeedContextTail(crossLaneTail);
                         }
 
                         var upcomingLines = bIdx + 1 < lane.Batches.Length
@@ -1032,9 +1043,9 @@ public sealed class TranslationTeam(ProjectStore store)
                     }
                     if (newTerms.Count > 0)
                     {
-                        var acceptedTerms = liveGlossary.TryAddBotTerms(newTerms);
+                        var acceptedTerms = liveGlossary.TryAddBotTerms(newTerms, overwrite: false);
                         if (acceptedTerms.Count > 0)
-                            worker.SaveBotTerms(acceptedTerms, "translator-bot");
+                            worker.SaveBotTerms(acceptedTerms, "translator-bot", overwrite: false);
                     }
 
                     if (missingWireIds.Count > 0 && !correction && failures < 2)
@@ -1269,7 +1280,7 @@ public sealed class TranslationTeam(ProjectStore store)
             foreach (var r in rows)
             {
                 if (work.Drafts.TryGetValue(r.Id, out string? d) && !string.IsNullOrWhiteSpace(d))
-                    draftMap[realToWire[r.Id]] = d;
+                    draftMap[realToWire[r.Id]] = RemaskDraft(d, masked[r.Id].Map);
             }
             if (draftMap.Count > 0 && userDraftReq.Length <= 1600)
             {
@@ -1286,13 +1297,25 @@ public sealed class TranslationTeam(ProjectStore store)
         return history.Count > 0 ? history : null;
     }
 
+    private static string RemaskDraft(string draft, Dictionary<string, string> tokenMap)
+    {
+        if (tokenMap.Count == 0 || string.IsNullOrEmpty(draft)) return draft;
+        string result = draft;
+        foreach (var pair in tokenMap.OrderByDescending(p => p.Value.Length))
+        {
+            if (pair.Value.Length == 0) continue;
+            int idx = result.IndexOf(pair.Value, StringComparison.Ordinal);
+            if (idx >= 0)
+                result = string.Concat(result.AsSpan(0, idx), pair.Key, result.AsSpan(idx + pair.Value.Length));
+        }
+        return result;
+    }
+
     private static int Apply(ProjectStore worker, TeamPlan plan, TeamBatch batch, Work work, bool approveReviewed,
         SceneSessionState? laneSession = null)
     {
         bool reviewDrafts = plan.Settings.ReviewDrafts;
         var completedContext = new List<ContextLine>();
-        var turnSourceMap = new List<object>();
-        var turnTargetMap = new Dictionary<string, string>(StringComparer.Ordinal);
         worker.Execute("BEGIN IMMEDIATE");
         try
         {
@@ -1324,15 +1347,7 @@ public sealed class TranslationTeam(ProjectStore store)
                     saved[row.Id] = current.Revision;
                     newlySaved++;
                     if (!string.IsNullOrWhiteSpace(row.Source) && !string.IsNullOrWhiteSpace(target))
-                    {
                         completedContext.Add(new ContextLine(row.Source, target));
-                        if (turnTargetMap.Count < 8)
-                        {
-                            string wire = (idx + 1).ToString();
-                            turnSourceMap.Add(new { id = wire, source = row.Source });
-                            turnTargetMap[wire] = target;
-                        }
-                    }
                 }
             }
             var tailToPersist = completedContext.Count <= 6 ? completedContext : completedContext[^6..];
@@ -1346,16 +1361,8 @@ public sealed class TranslationTeam(ProjectStore store)
             }
             worker.Execute("COMMIT");
 
-            if (laneSession != null && tailToPersist.Count > 0)
-            {
-                string userSummary = turnTargetMap.Count > 0
-                    ? JsonSerializer.Serialize(new { entries = turnSourceMap }, PayloadJson)
-                    : "";
-                string assistantJson = turnTargetMap.Count > 0
-                    ? JsonSerializer.Serialize(turnTargetMap, PayloadJson)
-                    : "";
-                laneSession.RecordCompletedTurn(userSummary, assistantJson, tailToPersist);
-            }
+            if (laneSession != null && completedContext.Count > 0)
+                laneSession.RecordCompletedBatch(completedContext);
             return newlySaved;
         }
         catch { worker.Execute("ROLLBACK"); throw; }
@@ -1670,7 +1677,8 @@ public sealed class TranslationTeam(ProjectStore store)
         foreach (var row in batch.Rows.TakeLast(6))
         {
             var unit = worker.UnitsById(row.Id);
-            if (unit != null && !string.IsNullOrWhiteSpace(unit.Source) && !string.IsNullOrWhiteSpace(unit.Target))
+            if (unit != null && unit.Warning.Length == 0 && unit.Status != "conflict"
+                && !string.IsNullOrWhiteSpace(unit.Source) && !string.IsNullOrWhiteSpace(unit.Target))
                 fallback.Add(new ContextLine(unit.Source, unit.Target));
         }
         return fallback;

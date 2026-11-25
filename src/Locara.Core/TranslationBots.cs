@@ -40,8 +40,11 @@ public static partial class GameTermMiner
     [GeneratedRegex(@"^(?<sp>[A-Z][A-Za-z0-9_'\-]{1,22}):\s+\S", RegexOptions.Compiled)]
     private static partial Regex LineSpeakerPrefix();
 
-    [GeneratedRegex(@"(?:speaker\s*=\s*|\[)(?<sp>[A-Z][A-Za-z0-9_'\-]{1,22})\]?", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    [GeneratedRegex(@"(?:(?i:speaker)\s*=\s*(?<sp>[A-Z][A-Za-z0-9_'\-]{1,22})|^\[(?<sp>[A-Z][A-Za-z0-9_'\-]{1,22})\]$)", RegexOptions.Compiled)]
     private static partial Regex ContextSpeakerPattern();
+
+    [GeneratedRegex(@"\{[^{}\r\n]+\}|\[[^\[\]\r\n]+\]|<[^<>\r\n]+>", RegexOptions.Compiled)]
+    private static partial Regex InlineMarkupOrPlaceholderPattern();
 
     [GeneratedRegex(@"\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,}){1,2}\b", RegexOptions.Compiled)]
     private static partial Regex TitlePhrasePattern();
@@ -91,19 +94,20 @@ public static partial class GameTermMiner
 
                 if (!string.IsNullOrWhiteSpace(row.Context))
                 {
-                    var ctxSp = ContextSpeakerPattern().Match(row.Context);
+                    var ctxSp = ContextSpeakerPattern().Match(row.Context.Trim());
                     if (ctxSp.Success)
                         Record(ctxSp.Groups["sp"].Value, isSpeaker: true, src);
                 }
 
+                string cleanSrc = InlineMarkupOrPlaceholderPattern().Replace(src, " ");
                 var phraseSpans = new List<(int Start, int End)>();
-                foreach (Match m in TitlePhrasePattern().Matches(src))
+                foreach (Match m in TitlePhrasePattern().Matches(cleanSrc))
                 {
                     phraseSpans.Add((m.Index, m.Index + m.Length));
                     Record(m.Value, isSpeaker: false, src);
                 }
 
-                foreach (Match m in MidSentenceProperNounPattern().Matches(src))
+                foreach (Match m in MidSentenceProperNounPattern().Matches(cleanSrc))
                 {
                     bool insidePhrase = phraseSpans.Any(s => m.Index >= s.Start && m.Index < s.End);
                     if (!insidePhrase)
@@ -154,31 +158,35 @@ public static class SceneLaneBuilder
         var lanes = new List<SceneLane>();
         int nextLaneId = 1;
 
-        if (bySection.Count >= effectiveWorkers || effectiveWorkers == 1)
+        if (effectiveWorkers == 1)
         {
-            for (int i = 0; i < bySection.Count; i++)
-            {
-                var (sec, secBatches) = bySection[i];
-                int worker = preferredWorkers != null && preferredWorkers.TryGetValue(sec, out int pw) && pw >= 1 && pw <= effectiveWorkers
-                    ? pw
-                    : (i % effectiveWorkers) + 1;
-                lanes.Add(new SceneLane(nextLaneId++, sec, worker, secBatches));
-            }
+            foreach (var (sec, secBatches) in bySection)
+                lanes.Add(new SceneLane(nextLaneId++, sec, 1, secBatches));
             return lanes;
         }
 
-        // Fewer sections than workers: split large sections into contiguous chapter slices.
+        // Split oversized sections into contiguous chapter slices while keeping smaller sections whole.
         // In smart/team modes, enforce >= 2 batches per slice to preserve rolling scene continuity;
         // in fastMode, allow 1-batch slices when needed to saturate all requested parallel workers.
         int minBatchesPerSlice = fastMode ? 1 : 2;
         int totalBatches = batches.Count;
+        double avgPerWorker = Math.Max(1.0, (double)totalBatches / effectiveWorkers);
         int nextWorker = 0;
 
         foreach (var (sec, secBatches) in bySection)
         {
             int maxPossibleSlices = Math.Max(1, secBatches.Length / minBatchesPerSlice);
-            int proportionalTarget = Math.Max(1, (int)Math.Round((double)secBatches.Length / Math.Max(1, totalBatches) * effectiveWorkers));
-            int sliceCount = Math.Clamp(proportionalTarget, 1, Math.Min(effectiveWorkers, maxPossibleSlices));
+            int sliceCount = 1;
+            if (bySection.Count < effectiveWorkers)
+            {
+                int proportionalTarget = Math.Max(1, (int)Math.Round(secBatches.Length / Math.Max(1.0, totalBatches) * effectiveWorkers));
+                sliceCount = Math.Clamp(proportionalTarget, 1, Math.Min(effectiveWorkers, maxPossibleSlices));
+            }
+            else if (secBatches.Length >= Math.Max(4, (int)Math.Ceiling(avgPerWorker * 1.6)) && maxPossibleSlices >= 2)
+            {
+                int skewedTarget = Math.Max(2, (int)Math.Round(secBatches.Length / avgPerWorker));
+                sliceCount = Math.Clamp(skewedTarget, 1, Math.Min(effectiveWorkers, maxPossibleSlices));
+            }
 
             if (sliceCount <= 1)
             {
@@ -238,7 +246,7 @@ public sealed class LiveGlossary
     public Dictionary<string, string> ExportBotTerms() =>
         bot.Values.ToDictionary(v => v.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
 
-    public Dictionary<string, string> TryAddBotTerms(IReadOnlyDictionary<string, string>? candidateTerms)
+    public Dictionary<string, string> TryAddBotTerms(IReadOnlyDictionary<string, string>? candidateTerms, bool overwrite = true)
     {
         var accepted = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (candidateTerms == null || candidateTerms.Count == 0) return accepted;
@@ -252,8 +260,15 @@ public sealed class LiveGlossary
             if (manual.ContainsKey(key)) continue; // Manual user glossary is strictly authoritative
             if (!key.Any(char.IsLetter)) continue;
 
-            bot[key] = (key, val);
-            accepted[key] = val;
+            if (overwrite)
+            {
+                bot[key] = (key, val);
+                accepted[key] = val;
+            }
+            else if (bot.TryAdd(key, (key, val)))
+            {
+                accepted[key] = val;
+            }
         }
         return accepted;
     }
@@ -288,6 +303,8 @@ public sealed class LiveGlossary
 
     internal static bool ContainsWholeTerm(string haystack, string term)
     {
+        if (string.IsNullOrEmpty(term) || string.IsNullOrEmpty(haystack) || haystack.Length < term.Length)
+            return false;
         int idx = 0;
         while ((idx = haystack.IndexOf(term, idx, StringComparison.OrdinalIgnoreCase)) >= 0)
         {
@@ -324,6 +341,37 @@ public sealed class SceneSessionState(int maxTurns = 2, int maxHistoryChars = 24
             }
             TrimContextTailUnsafe();
         }
+    }
+
+    public void RecordCompletedBatch(IReadOnlyList<ContextLine>? completedLines)
+    {
+        if (completedLines == null || completedLines.Count == 0) return;
+        var valid = completedLines
+            .Where(l => !string.IsNullOrWhiteSpace(l.Source) && !string.IsNullOrWhiteSpace(l.Target))
+            .ToList();
+        if (valid.Count == 0) return;
+
+        // Build compact trailing pair from the last <= 6 lines, shrinking from the front so even dense 30-line batches fit maxHistoryChars!
+        int pairBudget = Math.Max(160, Math.Min(1200, maxHistoryChars));
+        var slice = valid.Count <= 6 ? valid : valid[^6..];
+        string userSummary = "";
+        string assistantJson = "";
+        for (int start = 0; start < slice.Count; start++)
+        {
+            var sub = slice[start..];
+            var uEntries = sub.Select((l, i) => new { id = (i + 1).ToString(), source = l.Source });
+            var aMap = sub.Select((l, i) => (Key: (i + 1).ToString(), l.Target))
+                .ToDictionary(x => x.Key, x => x.Target, StringComparer.Ordinal);
+            string uCand = System.Text.Json.JsonSerializer.Serialize(new { entries = uEntries });
+            string aCand = System.Text.Json.JsonSerializer.Serialize(aMap);
+            if (uCand.Length + aCand.Length <= pairBudget)
+            {
+                userSummary = uCand;
+                assistantJson = aCand;
+                break;
+            }
+        }
+        RecordCompletedTurn(userSummary, assistantJson, valid);
     }
 
     public void RecordCompletedTurn(string userSummary, string assistantJson, IEnumerable<ContextLine>? completedLines)
@@ -388,7 +436,7 @@ public sealed class SceneSessionState(int maxTurns = 2, int maxHistoryChars = 24
 /// </summary>
 public static class SmartQaEvaluator
 {
-    private static readonly char[] NarrativePunctuation = ['?', '!', '؟', '"', '“', '”', '…', ';', '\n', '\r'];
+    private static readonly char[] NarrativePunctuation = ['?', '!', '؟', ',', '،', '"', '“', '”', '…', ';', '\n', '\r'];
 
     public static bool NeedsReview(TeamRow row, string draft, IReadOnlyDictionary<string, string>? matchedTerms)
     {
@@ -397,18 +445,22 @@ public static class SmartQaEvaluator
         if (src.Length == 0) return false;
         if (tgt.Length == 0) return true;
 
-        // 1. Any sentence/dialogue length or narrative punctuation goes to Smart QA Bot
-        if (src.Length > 36 || src.IndexOfAny(NarrativePunctuation) >= 0 || src.Contains(": ", StringComparison.Ordinal))
+        // 1. Any sentence/dialogue length or narrative punctuation (including period-terminated sentences) goes to Smart QA Bot
+        if (src.Length > 36 || src.IndexOfAny(NarrativePunctuation) >= 0
+            || src.EndsWith('.') || src.Contains(". ", StringComparison.Ordinal)
+            || src.Contains(": ", StringComparison.Ordinal))
             return true;
 
         int wordCount = src.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
         if (wordCount > 4) return true;
 
-        // 2. If source contains Latin letters, auto-skip requires Arabic script in draft (otherwise let QA Bot verify acronyms like "DLSS")
-        if (src.Any(c => c is (>= 'A' and <= 'Z') or (>= 'a' and <= 'z')) && !ArabicTextEngine.HasArabic(tgt))
+        // 2. If source contains Latin letters, auto-skip requires pure Arabic script without leftover Latin words (otherwise let QA Bot verify!)
+        bool srcHasLatin = src.Any(c => c is (>= 'A' and <= 'Z') or (>= 'a' and <= 'z'));
+        bool tgtHasLatin = tgt.Any(c => c is (>= 'A' and <= 'Z') or (>= 'a' and <= 'z'));
+        if (srcHasLatin && (!ArabicTextEngine.HasArabic(tgt) || tgtHasLatin))
             return true;
 
-        // 3. Unusual expansion/truncation ratio routes to QA Bot
+        // 3. Unusual expansion ratio routes to QA Bot
         if (tgt.Length > Math.Max(24, src.Length * 3))
             return true;
 
@@ -431,14 +483,13 @@ public static class SmartQaEvaluator
         if (arabicDraft.Contains(expectedArabicTerm, StringComparison.Ordinal))
             return true;
 
-        // Handle Arabic clitics attaching to definite article (e.g., لـ + القلعة -> للقلعة, لـ + إيلينا -> لإيلينا)
         string[] tokens = expectedArabicTerm.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         foreach (string tok in tokens)
         {
             string stem = tok.StartsWith("ال", StringComparison.Ordinal) && tok.Length >= 4
                 ? tok[2..]
                 : tok;
-            if (stem.Length >= 2 && !arabicDraft.Contains(stem, StringComparison.Ordinal))
+            if (stem.Length >= 1 && !arabicDraft.Contains(stem, StringComparison.Ordinal))
                 return false;
         }
         return tokens.Length > 0;

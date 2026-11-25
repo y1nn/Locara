@@ -134,7 +134,7 @@ public sealed class ProjectStore : IDisposable
         try
         {
             connection.Open();
-            Execute($"PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout={Math.Min(commandTimeout, 15) * 1000};");
+            Execute($"PRAGMA busy_timeout={Math.Min(commandTimeout, 15) * 1000}; PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
             if (SchemaVersion() != 6) Upgrade();
         }
         catch { connection.Dispose(); throw; }
@@ -474,29 +474,52 @@ public sealed class ProjectStore : IDisposable
     public Dictionary<string,string> Glossary() => Query("SELECT source,target FROM glossary", r => (r.GetString(0), r.GetString(1))).ToDictionary(x => x.Item1, x => x.Item2);
     public void RemoveTerm(string source) => Execute("DELETE FROM glossary WHERE source=$s", ("$s", source));
 
-    public Dictionary<string, string> BotGlossary() =>
-        Query("SELECT source, target FROM bot_glossary", r => (r.GetString(0), r.GetString(1)))
-            .ToDictionary(x => x.Item1, x => x.Item2, StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> BotGlossary()
+    {
+        var rows = Query("SELECT source, target FROM bot_glossary ORDER BY (note='lore-bot') DESC, rowid ASC",
+            r => (Source: r.GetString(0), Target: r.GetString(1)));
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (src, tgt) in rows)
+        {
+            if (!map.ContainsKey(src))
+                map[src] = tgt;
+        }
+        return map;
+    }
 
-    public void SaveBotTerms(IReadOnlyDictionary<string, string> terms, string note = "")
+    public void SaveBotTerms(IReadOnlyDictionary<string, string> terms, string note = "", bool overwrite = true)
     {
         if (terms.Count == 0) return;
         Execute("BEGIN IMMEDIATE");
         try
         {
+            var existing = overwrite ? null : BotGlossary();
             foreach (var (src, tgt) in terms)
             {
                 string s = (src ?? "").Trim();
                 string t = (tgt ?? "").Trim();
                 if (s.Length == 0 || t.Length == 0) continue;
-                Execute("""
-                    INSERT INTO bot_glossary(source, target, note, updated)
-                    VALUES($s, $t, $n, CURRENT_TIMESTAMP)
-                    ON CONFLICT(source) DO UPDATE SET
-                        target = excluded.target,
-                        note = excluded.note,
-                        updated = CURRENT_TIMESTAMP
-                    """, ("$s", s), ("$t", t), ("$n", note ?? ""));
+                if (!overwrite && existing != null && existing.ContainsKey(s)) continue;
+                if (overwrite)
+                {
+                    Execute("""
+                        INSERT INTO bot_glossary(source, target, note, updated)
+                        VALUES($s, $t, $n, CURRENT_TIMESTAMP)
+                        ON CONFLICT(source) DO UPDATE SET
+                            target = excluded.target,
+                            note = excluded.note,
+                            updated = CURRENT_TIMESTAMP
+                        """, ("$s", s), ("$t", t), ("$n", note ?? ""));
+                }
+                else
+                {
+                    Execute("""
+                        INSERT INTO bot_glossary(source, target, note, updated)
+                        VALUES($s, $t, $n, CURRENT_TIMESTAMP)
+                        ON CONFLICT(source) DO NOTHING
+                        """, ("$s", s), ("$t", t), ("$n", note ?? ""));
+                    existing?[s] = t;
+                }
             }
             Execute("COMMIT");
         }

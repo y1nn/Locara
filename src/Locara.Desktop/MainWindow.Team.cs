@@ -521,7 +521,6 @@ public partial class MainWindow
     private async Task ReviewDraftsWithAiCore()
     {
         TranslationMode.SelectedValue = "review-drafts";
-        SpeedMode.SelectedValue = "team";
         AutoApproveReviewed.IsChecked = true;
         Tabs.SelectedItem = TranslationPage;
         await StartUnifiedTranslationCore();
@@ -727,7 +726,8 @@ public partial class MainWindow
             {
                 using var project = new ProjectStore(path);
                 var team = new TranslationTeam(project);
-                if (saveSettings) team.Settings = overrideSettings with { ReviewDrafts = false };
+                if (saveSettings && !plan.Settings.ReviewDrafts)
+                    team.Settings = overrideSettings with { ReviewDrafts = false };
                 TeamProgress status = await team.Run(plan, options, progress, cancellation,
                     approveReviewed: approveReviewed, overrideWorkers: workers, overrideFastMode: overrideFastMode,
                     profiles: profiles, overrideSettings: overrideSettings);

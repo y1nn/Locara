@@ -209,17 +209,37 @@ public sealed partial class ApiProvider : ITranslationProvider
     internal static Dictionary<string, string> ReadTranslationsAndTermsPartial(string content, IEnumerable<string> ids,
         out List<string> missingIds, out Dictionary<string, string> newTerms, IReadOnlySet<string>? allowBlankIds = null)
     {
+        var idList = ids as IReadOnlyCollection<string> ?? ids.ToList();
+        var expectedSet = idList.ToHashSet(StringComparer.Ordinal);
         newTerms = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         string effectiveContent = content;
         try
         {
             using var doc = JsonDocument.Parse(CleanJsonPayload(content), LenientJson);
-            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+            var root = doc.RootElement;
+            // Unwrap outer single-key wrapper (e.g. {"data": {"translations": {...}, "newTerms": {...}}}) when not an expected ID
+            for (int depth = 0; depth < 2 && root.ValueKind == JsonValueKind.Object; depth++)
             {
-                JsonElement? transNode = null;
-                foreach (var prop in doc.RootElement.EnumerateObject())
+                var props = root.EnumerateObject().ToArray();
+                if (props.Length == 1 && !expectedSet.Contains(props[0].Name) && WrapperKeys.Contains(props[0].Name)
+                    && props[0].Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
                 {
-                    if (WrapperKeys.Contains(prop.Name) && prop.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+                    root = props[0].Value;
+                    continue;
+                }
+                break;
+            }
+
+            if (root.ValueKind == JsonValueKind.Object)
+            {
+                bool rootHasDirectExpectedIds = root.EnumerateObject().Any(p => expectedSet.Contains(p.Name));
+                JsonElement? transNode = null;
+                foreach (var prop in root.EnumerateObject())
+                {
+                    if (expectedSet.Contains(prop.Name)) continue;
+
+                    if (!rootHasDirectExpectedIds && WrapperKeys.Contains(prop.Name)
+                        && prop.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
                     {
                         transNode ??= prop.Value;
                     }
@@ -244,6 +264,8 @@ public sealed partial class ApiProvider : ITranslationProvider
                 }
                 if (transNode.HasValue)
                     effectiveContent = transNode.Value.GetRawText();
+                else if (rootHasDirectExpectedIds)
+                    effectiveContent = root.GetRawText();
             }
         }
         catch (JsonException)
@@ -251,7 +273,7 @@ public sealed partial class ApiProvider : ITranslationProvider
             // Fall through to ReadTranslationsCore which emits the standard Arabic error
         }
 
-        return ReadTranslationsCore(effectiveContent, ids, allowBlankIds, allowPartial: true, out missingIds);
+        return ReadTranslationsCore(effectiveContent, idList, allowBlankIds, allowPartial: true, out missingIds);
     }
 
     private static Dictionary<string, string> ReadTranslationsCore(string content, IEnumerable<string> ids,
@@ -446,21 +468,25 @@ public sealed partial class ApiProvider : ITranslationProvider
     {
         if (history == null || history.Count == 0) return [];
         var clean = new List<ChatTurn>(history.Count);
-        string expected = "user";
+        string? pendingUser = null;
         foreach (var turn in history)
         {
-            if (string.IsNullOrWhiteSpace(turn.Content)) continue;
-            string role = turn.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase)
-                || turn.Role.Equals("model", StringComparison.OrdinalIgnoreCase)
-                ? "assistant"
-                : "user";
-            if (role != expected) continue;
-            clean.Add(new ChatTurn(role, turn.Content));
-            expected = role == "user" ? "assistant" : "user";
+            if (turn == null || string.IsNullOrWhiteSpace(turn.Content)) continue;
+            string rawRole = turn.Role ?? "";
+            bool isAssistant = rawRole.Equals("assistant", StringComparison.OrdinalIgnoreCase)
+                || rawRole.Equals("model", StringComparison.OrdinalIgnoreCase);
+            if (!isAssistant)
+            {
+                // Latest user turn replaces any previous unpaired user turn
+                pendingUser = turn.Content;
+            }
+            else if (pendingUser != null)
+            {
+                clean.Add(new ChatTurn("user", pendingUser));
+                clean.Add(new ChatTurn("assistant", turn.Content));
+                pendingUser = null;
+            }
         }
-        // History before a new user message must end with an assistant turn so user/assistant strictly alternates
-        if (clean.Count > 0 && clean[^1].Role == "user")
-            clean.RemoveAt(clean.Count - 1);
         return clean;
     }
 
