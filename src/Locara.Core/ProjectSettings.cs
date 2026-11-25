@@ -100,6 +100,28 @@ public sealed class ProjectSettings(ProjectStore store)
             store.Get("unity_arabic_shaping"),
             store.Get("unity_arabic_contrast"));
 
+    public void SaveUnityDisplayOptions(UnityArabicDisplayOptions options)
+    {
+        store.Set("unity_arabic_wrap", options.WrapMode);
+        store.Set("unity_arabic_font_scale", options.FontScale.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
+        store.Set("unity_arabic_shaping", options.ShapeArabic ? "1" : "0");
+        store.Set("unity_arabic_contrast", options.ContrastBoost ? "1" : "0");
+    }
+
+    public string RenpySdk
+    {
+        get => store.Get("renpy_sdk");
+        set => store.Set("renpy_sdk", value ?? "");
+    }
+
+    public string GetRenpyOriginFor(string source) => store.Get("renpy-origin-for:" + source);
+
+    public string EditorViewKey => "editor-view:" + SourceScope + ":" + ScannedPackage;
+
+    public string GetEditorViewRaw() => store.Get(EditorViewKey);
+
+    public void SetEditorViewRaw(string serialized) => store.Set(EditorViewKey, serialized);
+
     public ArabicFontChoice ResolveDisplayFont(string? customFontsDir = null) =>
         ArabicFontCatalog.Resolve(DisplayFont, customFontsDir ?? Path.Combine(LocaraPaths.UserDataDirectory, "fonts"));
 

@@ -65,7 +65,7 @@ public static class SteamGameTrial
                 throw new InvalidOperationException("تغيّرت وجهة التجربة بعد الموافقة.");
             RequireClosed(target, game.Name);
             progress?.Report("جارٍ بناء حزمة التجربة");
-            build = new ProjectService(project).Build(output, final: false, password: password, cancellation: cancellation, reviewed: preview);
+            build = new ProjectService(project).Build(output, final: false, password: password, cancellation: cancellation, reviewed: preview, overlayOnly: true);
             project.LastOutput = build.Directory;
         }
 

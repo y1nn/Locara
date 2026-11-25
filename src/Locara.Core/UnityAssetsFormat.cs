@@ -137,7 +137,7 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
             }
             if (nodesToPatch.Count == 0) return;
 
-            bool anyArabicInFile = translations.Values.Any(StarTruckerDisplay.HasArabic);
+            bool anyArabicInFile = translations.Values.Any(ArabicTextEngine.HasArabic);
             if (anyArabicInFile && !nodesToPatch.Contains("resources.assets")
                 && UnityFsStream.ListSerializedNodeNames(sourceFilePath)
                     .Any(n => n.Equals("resources.assets", StringComparison.OrdinalIgnoreCase)))
@@ -244,7 +244,7 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
             if (!TryParseLocator(locator, out string locNode, out long pathId, out string kind, out string innerLocator))
                 continue;
             if (!locNode.Equals(nodeName, StringComparison.OrdinalIgnoreCase)) continue;
-            if (StarTruckerDisplay.HasArabic(target)) anyArabic = true;
+            if (ArabicTextEngine.HasArabic(target)) anyArabic = true;
             if (!grouped.TryGetValue(pathId, out var entry))
             {
                 entry = (kind, new Dictionary<string, string>(StringComparer.Ordinal));

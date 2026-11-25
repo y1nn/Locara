@@ -440,8 +440,8 @@ public sealed record UnityArabicDisplayOptions(string WrapMode = "auto", float F
     }
 
     public string TransformArabic(string text) =>
-        ShapeArabic && StarTruckerDisplay.HasArabic(text)
-            ? StarTruckerDisplay.Shape(text, MaxLineChars)
+        ShapeArabic && ArabicTextEngine.HasArabic(text)
+            ? ArabicTextEngine.WrapAndShape(text, MaxLineChars)
             : text;
 
     public static string NormalizeWrapMode(string? value)
@@ -457,9 +457,9 @@ public sealed record UnityArabicDisplayOptions(string WrapMode = "auto", float F
     public static int ParseWrapMode(string? value)
     {
         string norm = NormalizeWrapMode(value);
-        if (norm == "auto") return StarTruckerDisplay.AutoWrap;
+        if (norm == "auto") return ArabicTextEngine.AutoWrap;
         if (norm == "0") return 0;
-        return int.TryParse(norm, System.Globalization.CultureInfo.InvariantCulture, out int n) ? n : StarTruckerDisplay.AutoWrap;
+        return int.TryParse(norm, System.Globalization.CultureInfo.InvariantCulture, out int n) ? n : ArabicTextEngine.AutoWrap;
     }
 
     public static float ParseFontScale(string? value)
@@ -932,7 +932,7 @@ public sealed class UnityI2Format : IFormatHandler
 
         var opts = displayOptions ?? UnityArabicDisplayOptions.Default;
         var replacements = new Dictionary<long, byte[]>();
-        bool hasArabic = translations.Values.Any(StarTruckerDisplay.HasArabic);
+        bool hasArabic = translations.Values.Any(ArabicTextEngine.HasArabic);
         if (hasArabic)
             arabicFontPatched = UnityTmpArabicPatcher.TryPatch(sf, fontChoice, replacements, opts.FontScale, opts.ContrastBoost);
 
@@ -950,8 +950,8 @@ public sealed class UnityI2Format : IFormatHandler
                     && translations.TryGetValue(locator, out string? translated)
                     && translated != term.Languages[langIdx])
                 {
-                    string finalValue = arabicFontPatched && opts.ShapeArabic && StarTruckerDisplay.HasArabic(translated)
-                        ? StarTruckerDisplay.Shape(translated, opts.MaxLineChars)
+                    string finalValue = arabicFontPatched && opts.ShapeArabic && ArabicTextEngine.HasArabic(translated)
+                        ? ArabicTextEngine.WrapAndShape(translated, opts.MaxLineChars)
                         : translated;
                     var langs = term.Languages.ToArray();
                     langs[langIdx] = finalValue;

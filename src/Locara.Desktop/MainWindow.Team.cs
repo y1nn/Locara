@@ -514,7 +514,9 @@ public partial class MainWindow
         catch (Exception error) { if (path == projectPath) Status.Text = error.Message; }
     }
 
-    private async void ReviewDraftsWithAi(object sender, RoutedEventArgs e)
+    private async void ReviewDraftsWithAi(object sender, RoutedEventArgs e) => await ReviewDraftsWithAiCore();
+
+    private async Task ReviewDraftsWithAiCore()
     {
         TranslationMode.SelectedValue = "review-drafts";
         SpeedMode.SelectedValue = "team";
@@ -936,7 +938,8 @@ public partial class MainWindow
         using var project = new ProjectStore(path);
         var team = new TranslationTeam(project);
         var plan = team.Latest ?? throw new InvalidOperationException("لا يوجد تشغيل فريق محفوظ لهذا المصدر.");
-        if (plan.Package != project.Get("scanned_package") || plan.Engine != project.Get("scanned_engine"))
+        var projSettings = new ProjectSettings(project);
+        if (plan.Package != projSettings.ScannedPackage || plan.Engine != projSettings.ScannedEngine)
             throw new InvalidOperationException("اختر الحزمة التي تخص تشغيل الفريق.");
         return read(team, plan);
     }

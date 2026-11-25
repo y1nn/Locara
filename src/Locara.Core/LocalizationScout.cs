@@ -132,7 +132,7 @@ public static class LocalizationScout
         Func<string, string, CancellationToken, Task<StructuredResponse>>? send = null)
     {
         var service = new ProjectService(store);
-        string engine = store.Get("scanned_engine");
+        string engine = new ProjectSettings(store).ScannedEngine;
         if (string.IsNullOrWhiteSpace(engine)) engine = store.Info.Engine;
 
         var allClusters = service.BuildSchemaClusters();

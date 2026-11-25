@@ -71,6 +71,138 @@ public sealed class CoreArchitectureV2Tests
 
         settings.GettextPoTarget = "locale/fr.po";
         Assert.Equal("locale/fr.po", settings.GettextPoTarget);
+
+        var customDisplay = new UnityArabicDisplayOptions("32", 0.90f, false, true);
+        settings.SaveUnityDisplayOptions(customDisplay);
+        var loadedDisplay = settings.ResolveUnityDisplayOptions();
+        Assert.Equal("32", loadedDisplay.WrapMode);
+        Assert.Equal(0.90f, loadedDisplay.FontScale);
+        Assert.False(loadedDisplay.ShapeArabic);
+        Assert.True(loadedDisplay.ContrastBoost);
+
+        settings.RenpySdk = "sdk-placeholder";
+        Assert.Equal("sdk-placeholder", settings.RenpySdk);
+        settings.AutomaticOutput = true;
+        Assert.True(settings.AutomaticOutput);
+        settings.SetEditorViewRaw("{\"Search\":\"hello\"}");
+        Assert.Equal("{\"Search\":\"hello\"}", settings.GetEditorViewRaw());
+    }
+
+    [Fact]
+    public void SingleFileLocalizationTextSourceScansTranslatesAndRebuildsPreservingParentFolderContext()
+    {
+        using var ws = new TempWorkspace();
+        string locDir = Directory.CreateDirectory(ws.PathOf("Game/Game_Data/Localisation Files")).FullName;
+        string englishTxt = Path.Combine(locDir, "English.txt");
+        File.WriteAllText(englishTxt, "1\tStart Expedition\n2\tSave Progress\n3\tExit Game\n", Encoding.UTF8);
+
+        using var store = ProjectStore.Create(ws.PathOf("single-txt-proj"), "SingleTxt", englishTxt);
+        var svc = new ProjectService(store);
+
+        var caps = svc.Capabilities();
+        Assert.True(caps.CanRead);
+
+        var scan = svc.Scan();
+        Assert.Equal(1, scan.Files);
+        Assert.Equal(3, scan.Units);
+
+        var first = store.Units("Start Expedition").Single();
+        first.Target = "ابدأ البعثة";
+        store.Save(first, approve: true);
+
+        var preview = svc.Preview(final: true);
+        Assert.Single(preview.ChangedFiles);
+
+        var built = svc.Build(ws.PathOf("single-txt-out"), final: true, reviewed: preview);
+        Assert.Equal(1, built.Translations);
+        string rebuilt = File.ReadAllText(Path.Combine(built.Directory, "resources/English.txt"), Encoding.UTF8);
+        Assert.Contains("1\tابدأ البعثة", rebuilt);
+        Assert.Contains("2\tSave Progress", rebuilt);
+    }
+
+    [Fact]
+    public void GenericLooseGameInPlaceDeployUsesOverlayOnlyAndSkipsUntouchedAssets()
+    {
+        using var ws = new TempWorkspace();
+        string gameDir = Directory.CreateDirectory(ws.PathOf("huge-generic-game")).FullName;
+        Directory.CreateDirectory(Path.Combine(gameDir, "locales", "en-US"));
+        Directory.CreateDirectory(Path.Combine(gameDir, "assets"));
+        string locPath = Path.Combine(gameDir, "locales", "en-US", "ui.json");
+        string untouchedBin = Path.Combine(gameDir, "assets", "big_textures.bin");
+        File.WriteAllText(locPath, """{"play":"Play Game","quit":"Quit"}""", Encoding.UTF8);
+        File.WriteAllBytes(untouchedBin, new byte[4096]);
+
+        using var store = ProjectStore.Create(ws.PathOf("overlay-proj"), "HugeGeneric", gameDir);
+        var svc = new ProjectService(store);
+        Assert.Equal(2, svc.Scan().Units);
+
+        var unit = store.Units("Play Game").Single();
+        unit.Target = "ابدأ اللعب";
+        store.Save(unit, approve: true);
+
+        var (build, install, _) = PackageInstaller.DeployInPlace(store, ws.PathOf("overlay-out"), final: true);
+        Assert.Equal(1, build.Translations);
+        Assert.Equal(1, install.Files);
+        // Overlay-only build MUST only emit changed localization file, NEVER copy untouched binary assets!
+        Assert.True(File.Exists(Path.Combine(build.Directory, "resources/locales/en-US/ui.json")));
+        Assert.False(File.Exists(Path.Combine(build.Directory, "resources/assets/big_textures.bin")));
+        Assert.Contains("ابدأ اللعب", File.ReadAllText(locPath, Encoding.UTF8));
+
+        int restored = PackageInstaller.RestoreInPlace(store);
+        Assert.Equal(1, restored);
+        Assert.Contains("Play Game", File.ReadAllText(locPath, Encoding.UTF8));
+    }
+
+    [Fact]
+    public void PreviewFingerprintInvalidatesWhenUnrealAesKeyChanges()
+    {
+        using var ws = new TempWorkspace();
+        string gameDir = Directory.CreateDirectory(ws.PathOf("fp-game")).FullName;
+        File.WriteAllText(Path.Combine(gameDir, "ui.json"), """{"play":"Play"}""", Encoding.UTF8);
+        using var store = ProjectStore.Create(ws.PathOf("fp-proj"), "FpGame", gameDir);
+        var settings = new ProjectSettings(store);
+        var svc = new ProjectService(store);
+        svc.Scan();
+
+        var unit = store.Units().Single();
+        unit.Target = "العب";
+        store.Save(unit, approve: true);
+
+        var previewWithoutKey = svc.Preview(final: true);
+        settings.UnrealAesKey = "0x" + new string('A', 64);
+        var previewWithKey = svc.Preview(final: true);
+
+        Assert.NotEqual(previewWithoutKey.Fingerprint, previewWithKey.Fingerprint);
+        Assert.Throws<InvalidOperationException>(() =>
+            svc.Build(ws.PathOf("fp-stale-out"), final: true, reviewed: previewWithoutKey));
+    }
+
+    [Fact]
+    public void SchemaClustererSkipsLazySkippedZeroUnitFilesAndDeploymentAdvisorReflectsCoreV2()
+    {
+        var files = new List<FileQualitySummary>
+        {
+            new("locales/en-US/ui.json", "json", 10, 10, 0, 0, 10, 0, 0.0, FileQualityVerdict.Translatable, "Primary", ["Play the game"], true, 10, false),
+            new("locales/fr-FR/ui.json", "json", 0, 0, 0, 0, 0, 0, 0.0, FileQualityVerdict.SecondaryLanguage, "Secondary", [], false, 0, false),
+            new("vehicles/car/config.json", "json", 0, 0, 0, 0, 0, 0, 0.0, FileQualityVerdict.AuxiliaryData, "Auxiliary", [], false, 0, false)
+        };
+        var entries = new Dictionary<string, IReadOnlyList<(string Locator, string Source)>>
+        {
+            ["locales/en-US/ui.json"] = [("/play", "Play the game")]
+        };
+        var clusters = SchemaClusterer.Build(files, entries);
+        Assert.Single(clusters);
+        Assert.Equal("locales/en-US/ui.json", clusters[0].FilePaths.Single());
+
+        var ueCaps = new SourceCapability("Unreal Engine", "", false, false, GameLaunch.None, "", "");
+        var ueAdvice = DeploymentAdvisor.Analyze(ueCaps, []);
+        Assert.Contains(ueAdvice.Notes, n => n.Contains("AES-256", StringComparison.OrdinalIgnoreCase));
+
+        var unityCaps = new SourceCapability("Unity", "", true, true, GameLaunch.None, "", "");
+        var unityTxtFile = new FileQualitySummary("Localisation Files/English.txt", "loc-txt", 50, 50, 0, 0, 50, 0, 0.0,
+            FileQualityVerdict.Translatable, "Dedicated", ["Start"], true, 50, false);
+        var unityAdvice = DeploymentAdvisor.Analyze(unityCaps, [unityTxtFile]);
+        Assert.Contains(unityAdvice.Notes, n => n.Contains("TextMeshPro", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

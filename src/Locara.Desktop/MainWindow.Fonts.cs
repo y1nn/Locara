@@ -63,10 +63,7 @@ public partial class MainWindow
         {
             var opts = UnityArabicDisplayOptions.Parse(wrap, scale, shape ? "1" : "0", contrast ? "1" : "0");
             using var project = new ProjectStore(projectPath);
-            project.Set("unity_arabic_wrap", opts.WrapMode);
-            project.Set("unity_arabic_font_scale", opts.FontScale.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
-            project.Set("unity_arabic_shaping", opts.ShapeArabic ? "1" : "0");
-            project.Set("unity_arabic_contrast", opts.ContrastBoost ? "1" : "0");
+            new ProjectSettings(project).SaveUnityDisplayOptions(opts);
             string contrastLabel = opts.ContrastBoost ? " · تباين معزّز" : "";
             Status.Text = $"تم حفظ إعدادات العرض العربي لـ Unity (الالتفاف: {opts.WrapLabel} · الحجم: {opts.ScaleLabel}{contrastLabel}).";
         }
@@ -81,7 +78,7 @@ public partial class MainWindow
         try
         {
             using var project = new ProjectStore(projectPath);
-            project.Set("display_font", chosen.Id);
+            new ProjectSettings(project).DisplayFont = chosen.Id;
             Status.Text = $"تم اختيار الخط «{chosen.DisplayName}» — سيُطبّق تلقائياً عند التجربة أو بناء الحزمة.";
         }
         catch (Exception error) { Status.Text = error.Message; }
@@ -122,7 +119,7 @@ public partial class MainWindow
             if (projectPath != null)
             {
                 using var project = new ProjectStore(projectPath);
-                project.Set("display_font", newId);
+                new ProjectSettings(project).DisplayFont = newId;
             }
             LoadDisplayFontSelector(newId);
             Status.Text = $"أُضيف الخط الخاص «{Path.GetFileNameWithoutExtension(fileName)}» وحُفظ لمشاريعك.";
@@ -146,7 +143,7 @@ public partial class MainWindow
             if (projectPath != null)
             {
                 using var project = new ProjectStore(projectPath);
-                project.Set("display_font", ArabicFontCatalog.DefaultFontId);
+                new ProjectSettings(project).DisplayFont = ArabicFontCatalog.DefaultFontId;
             }
             LoadDisplayFontSelector(ArabicFontCatalog.DefaultFontId);
             Status.Text = "حُذف الخط الخاص وأُعيد الخط الافتراضي.";

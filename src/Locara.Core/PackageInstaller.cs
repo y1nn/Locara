@@ -156,9 +156,9 @@ public static class PackageInstaller
         if (plan.ChangedFiles.Count == 0)
             throw new InvalidOperationException("لا توجد ترجمات معتمدة أو تغييرات مؤهلة للتثبيت.");
 
-        var build = service.Build(outputDirectory, final, password, cancellation, plan);
+        var build = service.Build(outputDirectory, final, password, cancellation, plan, overlayOnly: true);
         project.LastOutput = build.Directory;
-        string engine = project.Get("scanned_engine");
+        string engine = new ProjectSettings(project).ScannedEngine;
         string summary = plan.Notice.Length > 0
             ? plan.Notice
             : $"{build.Translations} نص مترجم";

@@ -28,12 +28,13 @@ public partial class MainWindow
             try
             {
                 using var project = new ProjectStore(path);
+                var projSettings = new ProjectSettings(project);
                 string destination = "";
                 try { destination = PackageInstaller.ResolveInstallDestination(project); } catch { }
                 var state = PackageInstaller.GetInPlaceStatus(project);
-                string engine = project.Get("scanned_engine");
+                string engine = projSettings.ScannedEngine;
                 var (hasActivePot, siblingPos) = new ProjectService(project).GetGettextPoStatus();
-                string savedPoTarget = project.Get(ProjectService.GettextPoTargetSetting);
+                string savedPoTarget = projSettings.GettextPoTarget;
                 return (Destination: destination, State: state, Engine: engine, HasActivePot: hasActivePot, SiblingPos: siblingPos, SavedPoTarget: savedPoTarget, Error: (string?)null);
             }
             catch (Exception error)
@@ -159,7 +160,7 @@ public partial class MainWindow
         try
         {
             using var project = new ProjectStore(projectPath);
-            project.Set(ProjectService.GettextPoTargetSetting, target);
+            new ProjectSettings(project).GettextPoTarget = target;
             Status.Text = target is "export-ar" or "pot-only"
                 ? "تم حفظ خيار تصدير Gettext للمشروع."
                 : $"سيُطبّق التعريب على «{System.IO.Path.GetFileName(target)}» عند التجربة والتثبيت (مع نسخة احتياطية كاملة).";
@@ -236,6 +237,7 @@ public partial class MainWindow
     {
         if (projectPath == null || work != null || !SaveEdits()) return;
         string path = projectPath, password = ZipPassword.Password;
+        if (!TrySyncSourceAdvancedSettings(path)) return;
 
         (string Destination, string? Running, InPlaceInstallState? Existing, string Engine, string FontName, UnityArabicDisplayOptions UnityDisplay) precheck;
         try
@@ -243,12 +245,13 @@ public partial class MainWindow
             precheck = await Task.Run(() =>
             {
                 using var project = new ProjectStore(path);
+                var projSettings = new ProjectSettings(project);
                 string destination = PackageInstaller.ResolveInstallDestination(project);
                 string? running = PackageInstaller.FindRunningExecutableIn(destination);
                 var existing = PackageInstaller.GetInPlaceStatus(project);
-                string engine = project.Get("scanned_engine");
-                var font = ArabicFontCatalog.Resolve(project.Get("display_font"), CustomFontsDir);
-                var unityDisplay = UnityArabicDisplayOptions.Parse(project.Get("unity_arabic_wrap"), project.Get("unity_arabic_font_scale"), project.Get("unity_arabic_shaping"), project.Get("unity_arabic_contrast"));
+                string engine = projSettings.ScannedEngine;
+                var font = projSettings.ResolveDisplayFont(CustomFontsDir);
+                var unityDisplay = projSettings.ResolveUnityDisplayOptions();
                 return (Destination: destination, Running: running, Existing: existing, Engine: engine, FontName: font.DisplayName, UnityDisplay: unityDisplay);
             });
         }

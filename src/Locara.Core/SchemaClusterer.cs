@@ -41,6 +41,7 @@ public static class SchemaClusterer
 
         foreach (var file in files)
         {
+            if (file.TotalUnits == 0) continue;
             var entries = entriesByFile.GetValueOrDefault(file.Path) ?? [];
             string dirGroup = NormalizeDirectoryGroup(file.Path);
             string fingerprint = ComputeSchemaFingerprint(file.Format, dirGroup, entries);

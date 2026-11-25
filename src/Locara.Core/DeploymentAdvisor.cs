@@ -32,13 +32,13 @@ public static class DeploymentAdvisor
         string engine = NormalizeEngine(capability.Engine);
 
         // 1. Gettext .pot vs .po check (applies across Unity, Godot, Ren'Py, Unreal, and generic Gettext games)
-        var includedPots = included.Where(f => f.Format == "po" && ProjectService.IsGettextTemplate(f.Path)).ToList();
-        var includedPos = included.Where(f => f.Format == "po" && !ProjectService.IsGettextTemplate(f.Path)).ToList();
+        var includedPots = included.Where(f => f.Format == "po" && LocaleClassifier.IsGettextTemplate(f.Path)).ToList();
+        var includedPos = included.Where(f => f.Format == "po" && !LocaleClassifier.IsGettextTemplate(f.Path)).ToList();
         if (includedPots.Count > 0 && includedPos.Count == 0)
         {
             hasGettextPotOnly = true;
             siblingPoPaths = scannedFiles
-                .Where(f => f.Format == "po" && !ProjectService.IsGettextTemplate(f.Path))
+                .Where(f => f.Format == "po" && !LocaleClassifier.IsGettextTemplate(f.Path))
                 .Select(f => f.Path)
                 .ToList();
             notes.Add(siblingPoPaths.Count > 0
@@ -56,15 +56,17 @@ public static class DeploymentAdvisor
         {
             notes.Add("لعبة Unity Addressables: سيُحدّث Locara بصمات CRC32 والأحجام في catalog.bin / catalog.json تلقائياً ويحقن الخط العربي الاحتياطي في TextMeshPro.");
         }
-        else if (engine == "unity" && (activeFormats.Contains("unity-i2") || activeFormats.Contains("unity-assets")))
+        else if (engine == "unity" && (activeFormats.Contains("unity-i2") || activeFormats.Contains("unity-assets") || activeFormats.Contains("loc-txt")))
         {
             notes.Add("سيحقن Locara خط TextMeshPro العربي تلقائياً مع دعم الالتفاف الذكي للأسطر وخيار تعطيل التشكيل للألعاب الداعمة لـ RTL أصلياً.");
         }
 
-        // 3. Unreal Engine IoStore vs _P.pak note
+        // 3. Unreal Engine IoStore vs _P.pak & AES encryption note
         if (engine == "unreal")
         {
-            notes.Add("يدعم Locara حزم UE4/UE5 عبر توليد حزمة تعديل *_Locara_P.pak أو التحديث المباشر لحزم UE5 IoStore (.pak + .utoc) مع حقن خط عربي+لاتيني ثنائي.");
+            notes.Add(activeUnits == 0
+                ? "لم تُستخرج نصوص من حزم Unreal — إذا كان فهرس .pak مشفّراً بـ AES-256، أدخل مفتاح التشفير في «إعدادات المصدر المتقدمة» (أو --aes-key) ثم أعد الفحص."
+                : "يدعم Locara حزم UE4/UE5 عبر توليد حزمة تعديل *_Locara_P.pak أو التحديث المباشر لحزم UE5 IoStore (.pak + .utoc) مع حقن خط عربي+لاتيني ثنائي ودعم فك وإعادة تشفير AES-256.");
         }
 
         // 4. Godot PCK v2/v3 & binary .translation note

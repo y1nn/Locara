@@ -6,13 +6,15 @@ namespace Locara.Core;
 /// </summary>
 public static class ArabicTextEngine
 {
+    public const int AutoWrap = StarTruckerDisplay.AutoWrap;
+
     public static bool HasArabic(string? text) =>
         !string.IsNullOrEmpty(text) && StarTruckerDisplay.HasArabic(text);
 
     public static string Shape(string text) =>
         StarTruckerDisplay.Shape(text);
 
-    public static string WrapAndShape(string text, int maxVisibleCharsPerLine = StarTruckerDisplay.AutoWrap) =>
+    public static string WrapAndShape(string text, int maxVisibleCharsPerLine = AutoWrap) =>
         StarTruckerDisplay.Shape(text, maxVisibleCharsPerLine);
 
     public static string ValidateTokens(string source, string target, string engine = "") =>

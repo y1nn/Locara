@@ -48,13 +48,14 @@ public partial class MainWindow
     private static OverviewData ReadOverview(string path, bool includeSections)
     {
         using var store = new ProjectStore(path);
+        var projSettings = new ProjectSettings(store);
         var svc = new ProjectService(store);
         svc.EnsureCatalogSelected();
         var info = store.Info;
-        var version = store.Get("scan_version");
-        var engine = store.Get("scanned_engine");
-        var package = store.Get("scanned_package");
-        bool scanned = info.Source.Length > 0 && info.Source == store.Get("scanned_source");
+        var version = projSettings.ScanVersion;
+        var engine = projSettings.ScannedEngine;
+        var package = projSettings.ScannedPackage;
+        bool scanned = info.Source.Length > 0 && info.Source == projSettings.ScannedSource;
         bool errors = scanned && svc.HasBlockingScanErrors();
         var counts = store.ReviewCounts();
         string output = store.LastOutput;
@@ -197,9 +198,9 @@ public partial class MainWindow
         switch (nextAction)
         {
             case NextAction.Scan: await ScanCurrent(); break;
-            case NextAction.Templates: GenerateRenpy(sender, e); break;
+            case NextAction.Templates: await GenerateRenpyCore(); break;
             case NextAction.Issues: await OpenEditorFilter("issues"); break;
-            case NextAction.Drafts: ReviewDraftsWithAi(sender, e); break;
+            case NextAction.Drafts: await ReviewDraftsWithAiCore(); break;
             case NextAction.Translate:
                 Tabs.SelectedItem = TranslationPage;
                 if (!File.Exists(ProviderSettingsPath) && Model.Text.Length == 0 && ApiKey.Password.Length == 0)
@@ -210,21 +211,20 @@ public partial class MainWindow
                     await StartUnifiedTranslationCore();
                 }
                 break;
-            case NextAction.ResumeTeam: ResumeTeamQuick(sender, e); break;
-            case NextAction.ResumeBatch: ResumeTranslation(sender, e); break;
-            case NextAction.Trial: TryGame(sender, e); break;
+            case NextAction.ResumeTeam: await ResumeTeamQuickCore(); break;
+            case NextAction.ResumeBatch: await Translate(resume: true); break;
+            case NextAction.Trial: await TryGameCore(); break;
             case NextAction.Build: Tabs.SelectedItem = PackagesPage; await Build(true); break;
             default: Tabs.SelectedItem = FilesPage; break;
         }
     }
 
     private sealed record EditorView(string Search, string Filter, int Offset);
-    private static string ViewKey(ProjectStore project) => "editor-view:" + project.Get("source_scope") + ":" + project.Get("scanned_package");
 
     private static EditorView ReadEditorView(ProjectStore project, string source)
     {
         var fallback = new EditorView(ProjectService.InitialSearch(source), "", 0);
-        string saved = project.Get(ViewKey(project));
+        string saved = new ProjectSettings(project).GetEditorViewRaw();
         if (saved.Length == 0) return fallback;
         try
         {

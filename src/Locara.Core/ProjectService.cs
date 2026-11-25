@@ -34,11 +34,17 @@ public sealed partial class ProjectService(ProjectStore store)
             string? fullDiskPath = isFolder
                 ? System.IO.Path.Combine(Path, resource)
                 : (!IsArchive && File.Exists(Path) ? Path : null);
+            string? singleFileMatchPath = !isFolder && !IsArchive && fullDiskPath != null
+                ? fullDiskPath.Replace('\\', '/')
+                : null;
 
             foreach (var provider in LocalizationProviderRegistry.All)
             {
-                if (!provider.MatchesPath(resource)) continue;
-                var result = provider.Probe(resource, fullDiskPath, UnrealAesKey);
+                string? matchPath = provider.MatchesPath(resource)
+                    ? resource
+                    : (singleFileMatchPath != null && provider.MatchesPath(singleFileMatchPath) ? singleFileMatchPath : null);
+                if (matchPath == null) continue;
+                var result = provider.Probe(matchPath, fullDiskPath, UnrealAesKey);
                 if (!result.Supported && result.Diagnostic != null)
                     FormatDiagnostics.Add(new(resource, result.Diagnostic));
                 var resolved = result.Supported ? (result.ResolvedHandler ?? provider.Handler) : null;

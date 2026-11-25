@@ -1170,7 +1170,7 @@ public sealed class UnrealPakFormat : IFormatHandler
         {
             if (TrySplitPakLocator(locator, out string entryPath, out string innerLocator))
             {
-                if (StarTruckerDisplay.HasArabic(target)) anyArabic = true;
+                if (ArabicTextEngine.HasArabic(target)) anyArabic = true;
                 if (!grouped.TryGetValue(entryPath, out var map))
                 {
                     map = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -1180,7 +1180,7 @@ public sealed class UnrealPakFormat : IFormatHandler
             }
             else if (TrySplitPakStringTableLocator(locator, out string stPath, out string stInner))
             {
-                if (StarTruckerDisplay.HasArabic(target)) anyArabic = true;
+                if (ArabicTextEngine.HasArabic(target)) anyArabic = true;
                 if (!groupedStringTables.TryGetValue(stPath, out var stMap))
                 {
                     stMap = new Dictionary<string, string>(StringComparer.Ordinal);

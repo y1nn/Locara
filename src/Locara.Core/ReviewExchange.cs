@@ -49,7 +49,7 @@ public sealed class ReviewExchange(ProjectStore store)
         if (rows.Count == 0 || !rows[0].SequenceEqual(Header))
             throw new InvalidDataException("اختر ملف مراجعة CSV صادراً من Locara.");
         string id = ProjectId();
-        string engine = store.Get("scanned_engine");
+        string engine = new ProjectSettings(store).ScannedEngine;
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var changes = new List<ReviewChange>();
         foreach (var fields in rows.Skip(1))

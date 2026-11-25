@@ -5,10 +5,10 @@ namespace Locara.Core;
 public sealed partial class ProjectService
 {
     public BuildResult Build(string destination, bool final = false, string? password = null, CancellationToken cancellation = default,
-        PackagePreview? reviewed = null)
+        PackagePreview? reviewed = null, bool? overlayOnly = null)
     {
         store.Execute("BEGIN");
-        try { return BuildSnapshot(destination, final, password, cancellation, reviewed); }
+        try { return BuildSnapshot(destination, final, password, cancellation, reviewed, overlayOnly); }
         finally { store.Execute("ROLLBACK"); }
     }
 
@@ -591,6 +591,7 @@ public sealed partial class ProjectService
                 unityFontScale = unityDisplay.FontScale,
                 unityShapeArabic = unityDisplay.ShapeArabic,
                 unityContrastBoost = unityDisplay.ContrastBoost,
+                unrealAesKeyHash = source.UnrealAesKey is { Length: > 0 } k ? Identity.Hash(k) : "",
                 notice,
                 inputs = scanned.OrderBy(entry => entry.Key, StringComparer.Ordinal),
                 changedFiles,
@@ -600,7 +601,8 @@ public sealed partial class ProjectService
         return new(plan, profile, expected, changes, arabicDisplay);
     }
 
-    private BuildResult BuildSnapshot(string destination, bool final, string? password, CancellationToken cancellation, PackagePreview? reviewed)
+    private BuildResult BuildSnapshot(string destination, bool final, string? password, CancellationToken cancellation,
+        PackagePreview? reviewed, bool? overlayOnly = null)
     {
         destination = Path.GetFullPath(destination);
         var source = CurrentSource(cancellation);
@@ -650,8 +652,10 @@ public sealed partial class ProjectService
                 throw new InvalidOperationException("تغيّرت خطة البناء. راجع القائمة وأعد المحاولة.");
 
             var expected = plan.ExpectedHashes;
-            bool overlayOnly = !source.IsArchive && Directory.Exists(source.Root) && plan.Profile.Name is "unity" or "unreal";
-            var output = overlayOnly
+            bool useOverlay = !source.IsArchive && Directory.Exists(source.Root)
+                && (overlayOnly ?? (plan.Profile.Name is "unity" or "unreal" or "gamemaker"
+                    || (rewrites.Count > 0 && index.Entries.Count > 250)));
+            var output = useOverlay
                 ? rewrites.Values.ToList()
                 : index.Entries.Select(resource =>
                 {

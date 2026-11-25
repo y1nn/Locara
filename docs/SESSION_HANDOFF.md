@@ -7,7 +7,7 @@ Concise engineering reference for maintaining and extending **Locara** (post-`v1
 ## 1. Build, Test, CI & Publish Commands
 
 - **SDK:** `.NET 10.0.404` pinned in [global.json](../global.json) (`TreatWarningsAsErrors=true`, `RestorePackagesWithLockFile=true`).
-- **Build & Test (`90` xUnit tests):**
+- **Build & Test (`94` xUnit tests):**
   ```powershell
   dotnet build -c Release -p:RestoreLockedMode=true
   dotnet test -c Release --no-build
