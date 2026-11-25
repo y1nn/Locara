@@ -1075,3 +1075,349 @@ internal static class TextEncodingHelper
         return combined;
     }
 }
+
+/// <summary>
+/// Lossless plain-text localization handler for .txt files located inside explicit localization
+/// directories (Languages/, Localisation Files/, Localization/, Locales/, Translations/, Lang/, i18n/).
+/// Auto-detects key=value (quoted or unquoted with [Section] and // # ; comments), tab-separated
+/// key\tvalue, or line-by-line plain text layouts while preserving BOM, comments, and exact line endings.
+/// </summary>
+public sealed class LocalizationTextFormat : IFormatHandler
+{
+    public static LocalizationTextFormat Instance { get; } = new();
+    public string Name => "loc-txt";
+
+    private static readonly HashSet<string> ExcludedDocNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "readme", "license", "licenses", "credits", "changelog", "changes", "notes", "notice",
+        "third-party", "third_party", "thirdparty", "eula", "privacy", "about", "install",
+        "todo", "authors", "contributing", "copying", "patents", "steam_appid", "version"
+    };
+
+    private enum LayoutKind { KeyValue, TabSeparated, LineByLine }
+
+    private sealed record LinePart(string Content, string NewLine);
+
+    private sealed record EntrySpan(
+        int LineIndex,
+        string Locator,
+        string Source,
+        string Context,
+        string Prefix,
+        bool IsQuoted,
+        string Suffix);
+
+    public bool Supports(string path)
+    {
+        if (!path.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) return false;
+        if (XUnityTranslationFormat.Instance.Supports(path)) return false;
+        if (!ProjectService.IsExplicitLocalizationDirectory(path)) return false;
+        string stem = Path.GetFileNameWithoutExtension(path).Trim();
+        if (stem.Length == 0) return false;
+        string normalizedStem = stem.Trim('_').Trim('-');
+        if (ExcludedDocNames.Contains(normalizedStem)) return false;
+        if (normalizedStem.StartsWith("readme", StringComparison.OrdinalIgnoreCase)
+            || normalizedStem.StartsWith("license", StringComparison.OrdinalIgnoreCase)
+            || normalizedStem.StartsWith("changelog", StringComparison.OrdinalIgnoreCase))
+            return false;
+        return true;
+    }
+
+    public IReadOnlyList<TextSlot> Extract(byte[] bytes)
+    {
+        if (bytes.Length == 0 || LooksBinary(bytes)) return [];
+        var (text, _, _) = TextEncodingHelper.DecodeText(bytes);
+        var lines = SplitLines(text);
+        var (_, entries) = ParseEntries(lines);
+        return entries.Select(e => new TextSlot(e.Locator, e.Source, e.Context)).ToList();
+    }
+
+    public byte[] Apply(byte[] bytes, IReadOnlyDictionary<string, string> translations)
+    {
+        if (bytes.Length == 0 || translations.Count == 0 || LooksBinary(bytes)) return bytes;
+        var (text, encoding, preamble) = TextEncodingHelper.DecodeText(bytes);
+        var lines = SplitLines(text);
+        var (layout, entries) = ParseEntries(lines);
+        if (entries.Count == 0) return bytes;
+
+        var replacementsByLine = new Dictionary<int, string>();
+        foreach (var entry in entries)
+        {
+            if (!translations.TryGetValue(entry.Locator, out string? target)) continue;
+            if (target == entry.Source) continue;
+            string encoded = layout switch
+            {
+                LayoutKind.KeyValue when entry.IsQuoted => entry.Prefix + EncodeQuoted(target) + entry.Suffix,
+                LayoutKind.KeyValue => entry.Prefix + EscapeSingleLine(target) + entry.Suffix,
+                LayoutKind.TabSeparated => entry.Prefix + EscapeSingleLine(target) + entry.Suffix,
+                _ => SanitizeLineByLine(target)
+            };
+            replacementsByLine[entry.LineIndex] = encoded;
+        }
+        if (replacementsByLine.Count == 0) return bytes;
+
+        var sb = new StringBuilder(text.Length + 64);
+        for (int i = 0; i < lines.Count; i++)
+        {
+            sb.Append(replacementsByLine.TryGetValue(i, out string? updated) ? updated : lines[i].Content);
+            sb.Append(lines[i].NewLine);
+        }
+        return TextEncodingHelper.EncodeText(sb.ToString(), encoding, preamble);
+    }
+
+    private static bool LooksBinary(byte[] bytes)
+    {
+        bool hasUtf16Bom = bytes.Length >= 2
+            && ((bytes[0] == 0xFF && bytes[1] == 0xFE) || (bytes[0] == 0xFE && bytes[1] == 0xFF));
+        if (hasUtf16Bom) return false;
+        int check = Math.Min(bytes.Length, 4096);
+        int badControl = 0;
+        for (int i = 0; i < check; i++)
+        {
+            byte b = bytes[i];
+            if (b == 0) return true;
+            if (b < 0x20 && b is not ((byte)'\t' or (byte)'\r' or (byte)'\n' or 0x0C))
+                badControl++;
+        }
+        return badControl * 50 > check;
+    }
+
+    private static List<LinePart> SplitLines(string text)
+    {
+        var lines = new List<LinePart>();
+        int start = 0;
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (text[i] == '\r')
+            {
+                if (i + 1 < text.Length && text[i + 1] == '\n')
+                {
+                    lines.Add(new(text[start..i], "\r\n"));
+                    i++;
+                    start = i + 1;
+                }
+                else
+                {
+                    lines.Add(new(text[start..i], "\r"));
+                    start = i + 1;
+                }
+            }
+            else if (text[i] == '\n')
+            {
+                lines.Add(new(text[start..i], "\n"));
+                start = i + 1;
+            }
+        }
+        if (start < text.Length) lines.Add(new(text[start..], ""));
+        return lines;
+    }
+
+    private static bool IsCommentLine(string trimmed) =>
+        trimmed.StartsWith("//", StringComparison.Ordinal)
+        || trimmed.StartsWith('#')
+        || trimmed.StartsWith(';');
+
+    private static bool IsSectionHeader(string trimmed, out string section)
+    {
+        section = "";
+        if (trimmed.Length >= 3 && trimmed[0] == '[' && trimmed[^1] == ']')
+        {
+            section = trimmed[1..^1].Trim();
+            return section.Length > 0 && !section.Contains('[');
+        }
+        return false;
+    }
+
+    private static bool TrySplitKeyValue(string line, out string key, out string prefix, out string rawValue)
+    {
+        key = prefix = rawValue = "";
+        int eq = line.IndexOf('=');
+        if (eq <= 0) return false;
+        string left = line[..eq];
+        string trimmedKey = left.Trim();
+        if (trimmedKey.Length == 0 || trimmedKey.Length > 120) return false;
+        foreach (char c in trimmedKey)
+        {
+            if (!(char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ':' or '/' or '$'))
+                return false;
+        }
+        int valStart = eq + 1;
+        while (valStart < line.Length && line[valStart] is ' ' or '\t') valStart++;
+        key = trimmedKey;
+        prefix = line[..valStart];
+        rawValue = line[valStart..];
+        return rawValue.Length > 0;
+    }
+
+    private static bool TryParseQuotedValue(string rawValue, out string decoded, out string suffix)
+    {
+        decoded = suffix = "";
+        if (rawValue.Length < 2 || rawValue[0] != '"') return false;
+        var sb = new StringBuilder(rawValue.Length);
+        for (int i = 1; i < rawValue.Length; i++)
+        {
+            char c = rawValue[i];
+            if (c == '\\' && i + 1 < rawValue.Length)
+            {
+                char next = rawValue[++i];
+                sb.Append(next switch
+                {
+                    'n' => '\n',
+                    'r' => '\r',
+                    't' => '\t',
+                    '"' => '"',
+                    '\\' => '\\',
+                    _ => next
+                });
+            }
+            else if (c == '"')
+            {
+                decoded = sb.ToString();
+                suffix = rawValue[(i + 1)..];
+                return true;
+            }
+            else
+            {
+                sb.Append(c);
+            }
+        }
+        return false;
+    }
+
+    private static LayoutKind DetectLayout(List<LinePart> lines)
+    {
+        int candidates = 0, kvCount = 0, tabCount = 0;
+        foreach (var part in lines)
+        {
+            string trimmed = part.Content.Trim();
+            if (trimmed.Length == 0 || IsCommentLine(trimmed) || IsSectionHeader(trimmed, out _))
+                continue;
+            candidates++;
+            if (TrySplitKeyValue(part.Content, out _, out _, out _))
+                kvCount++;
+            else
+            {
+                int tab = part.Content.IndexOf('\t');
+                if (tab > 0 && !string.IsNullOrWhiteSpace(part.Content[..tab]) && !string.IsNullOrWhiteSpace(part.Content[(tab + 1)..]))
+                    tabCount++;
+            }
+        }
+        if (candidates == 0) return LayoutKind.LineByLine;
+        if (kvCount >= 1 && kvCount * 2 >= candidates) return LayoutKind.KeyValue;
+        if (tabCount >= 1 && tabCount * 2 >= candidates) return LayoutKind.TabSeparated;
+        return LayoutKind.LineByLine;
+    }
+
+    private static (LayoutKind Layout, List<EntrySpan> Entries) ParseEntries(List<LinePart> lines)
+    {
+        var layout = DetectLayout(lines);
+        var entries = new List<EntrySpan>();
+        var usedLocators = new HashSet<string>(StringComparer.Ordinal);
+        string section = "";
+        string lastComment = "";
+
+        string MakeUniqueLocator(string baseLocator, int lineIndex)
+        {
+            string loc = baseLocator;
+            if (!usedLocators.Add(loc))
+            {
+                loc = $"{baseLocator}#{lineIndex + 1}";
+                usedLocators.Add(loc);
+            }
+            return loc;
+        }
+
+        for (int i = 0; i < lines.Count; i++)
+        {
+            string raw = lines[i].Content;
+            string trimmed = raw.Trim();
+            if (trimmed.Length == 0)
+            {
+                lastComment = "";
+                continue;
+            }
+            if (IsCommentLine(trimmed))
+            {
+                string commentText = trimmed.TrimStart('/', '#', ';').Trim();
+                if (commentText.Length > 0) lastComment = commentText;
+                continue;
+            }
+
+            if (layout == LayoutKind.KeyValue)
+            {
+                if (IsSectionHeader(trimmed, out string sec))
+                {
+                    section = sec;
+                    lastComment = "";
+                    continue;
+                }
+                if (!TrySplitKeyValue(raw, out string key, out string prefix, out string rawValue))
+                {
+                    lastComment = "";
+                    continue;
+                }
+                bool isQuoted = TryParseQuotedValue(rawValue, out string decoded, out string suffix);
+                string value = isQuoted ? decoded : rawValue.TrimEnd();
+                if (!isQuoted) suffix = rawValue[value.Length..];
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    lastComment = "";
+                    continue;
+                }
+                string baseLoc = section.Length > 0 ? $"[{section}]{key}" : key;
+                string locator = MakeUniqueLocator(baseLoc, i);
+                string context = lastComment.Length > 0 ? lastComment : baseLoc;
+                entries.Add(new(i, locator, value, context, prefix, isQuoted, suffix));
+                lastComment = "";
+            }
+            else if (layout == LayoutKind.TabSeparated)
+            {
+                int tab = raw.IndexOf('\t');
+                if (tab <= 0) { lastComment = ""; continue; }
+                string key = raw[..tab].Trim();
+                string valRaw = raw[(tab + 1)..];
+                string value = valRaw.TrimEnd();
+                if (key.Length == 0 || string.IsNullOrWhiteSpace(value)) { lastComment = ""; continue; }
+                string suffix = valRaw[value.Length..];
+                string locator = MakeUniqueLocator(key, i);
+                string context = lastComment.Length > 0 ? lastComment : key;
+                entries.Add(new(i, locator, value, context, raw[..(tab + 1)], false, suffix));
+                lastComment = "";
+            }
+            else
+            {
+                string locator = $"line:{i + 1}";
+                entries.Add(new(i, locator, raw, $"Line {i + 1}", "", false, ""));
+                lastComment = "";
+            }
+        }
+
+        return (layout, entries);
+    }
+
+    private static string EncodeQuoted(string value)
+    {
+        var sb = new StringBuilder(value.Length + 4);
+        sb.Append('"');
+        foreach (char c in value)
+        {
+            switch (c)
+            {
+                case '\\': sb.Append("\\\\"); break;
+                case '"': sb.Append("\\\""); break;
+                case '\n': sb.Append("\\n"); break;
+                case '\r': sb.Append("\\r"); break;
+                case '\t': sb.Append("\\t"); break;
+                default: sb.Append(c); break;
+            }
+        }
+        sb.Append('"');
+        return sb.ToString();
+    }
+
+    private static string EscapeSingleLine(string value) =>
+        value.Replace("\r\n", "\\n").Replace("\r", "\\n").Replace("\n", "\\n");
+
+    private static string SanitizeLineByLine(string value) =>
+        value.Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ');
+}

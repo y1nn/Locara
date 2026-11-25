@@ -399,4 +399,173 @@ public sealed class StabilizationAndHardeningTests
         Assert.False(afterDisable);
         Assert.Empty(siblingsAfterDisable);
     }
+
+    [Fact]
+    public void ScanSurvivesInvalidUtf8JsonAndExtractsDedicatedLocaleTranslations()
+    {
+        using var ws = new TempWorkspace();
+        string gameDir = Directory.CreateDirectory(ws.PathOf("bad-utf8-game")).FullName;
+        Directory.CreateDirectory(Path.Combine(gameDir, "roadData"));
+        Directory.CreateDirectory(Path.Combine(gameDir, "locales", "translations", "en-US"));
+        Directory.CreateDirectory(Path.Combine(gameDir, "locales", "translations", "pl_PL"));
+        Directory.CreateDirectory(Path.Combine(gameDir, "data"));
+
+        // Invalid UTF-8 byte (0xA3 Latin-1 '£') inside a JSON string — System.Text.Json throws InvalidOperationException
+        byte[] badJson = [.. System.Text.Encoding.ASCII.GetBytes("{\"note\":\"price "), 0xA3, .. System.Text.Encoding.ASCII.GetBytes("10\"}")];
+        File.WriteAllBytes(Path.Combine(gameDir, "roadData", "broken_utf8.json"), badJson);
+
+        // 25 pure English UI strings in locales/translations/en-US/
+        var enEntries = Enumerable.Range(1, 25).Select(i => $"  \"ui.item.{i}\": \"Start mission number {i} now\"");
+        string enJson = "{\n" + string.Join(",\n", enEntries) + "\n}\n";
+        File.WriteAllText(Path.Combine(gameDir, "locales", "translations", "en-US", "main.translation.json"), enJson);
+
+        // Secondary locale pl_PL (BCP-47 pair not manually hardcoded in KnownLocaleCodes)
+        File.WriteAllText(Path.Combine(gameDir, "locales", "translations", "pl_PL", "main.translation.json"),
+            """{"ui.item.1":"Rozpocznij misję"}""");
+
+        // Unrelated human-looking sidecar JSON outside locales/
+        File.WriteAllText(Path.Combine(gameDir, "data", "extra_info.json"),
+            """{"title":"Vehicle Engine Spec","desc":"Standard turbocharged configuration"}""");
+
+        // Direct JsonFormat check: invalid UTF-8 throws InvalidDataException (not unhandled InvalidOperationException)
+        Assert.Throws<InvalidDataException>(() => new JsonFormat().Extract(badJson));
+
+        // 1. Even when invalid UTF-8 JSON sits inside locales/ (Pass 1), Scan must survive and record diagnostic without crashing
+        File.WriteAllBytes(Path.Combine(gameDir, "locales", "translations", "en-US", "broken_utf8.json"), badJson);
+
+        using var store = ProjectStore.Create(ws.PathOf("bad-utf8-proj"), "BadUtf8Game", gameDir);
+        var svc = new ProjectService(store);
+        var scan = svc.Scan();
+
+        // Scan must succeed (not throw) and extract all 25 English locale strings
+        Assert.Equal(25, scan.Units);
+        Assert.Contains(scan.Diagnostics, d => d.Path.Contains("broken_utf8.json", StringComparison.OrdinalIgnoreCase));
+
+        var files = svc.ScannedFiles();
+        var enFile = files.Single(f => f.Path.EndsWith("en-US/main.translation.json", StringComparison.OrdinalIgnoreCase));
+        Assert.True(enFile.Included);
+        Assert.Equal(25, enFile.IncludedUnits);
+
+        var plFile = files.Single(f => f.Path.EndsWith("pl_PL/main.translation.json", StringComparison.OrdinalIgnoreCase));
+        Assert.False(plFile.Included);
+        Assert.Equal(FileQualityVerdict.SecondaryLanguage, plFile.Verdict);
+
+        // Auxiliary sidecar outside locales/ is lazy-skipped (0 units initially) and extracts on demand when enabled!
+        var sidecar = files.Single(f => f.Path.EndsWith("data/extra_info.json", StringComparison.OrdinalIgnoreCase));
+        Assert.False(sidecar.Included);
+        Assert.Equal(FileQualityVerdict.AuxiliaryData, sidecar.Verdict);
+        Assert.Equal(0, sidecar.TotalUnits);
+
+        svc.SetFileIncluded(sidecar.Path, included: true);
+        var sidecarAfter = svc.ScannedFiles().Single(f => f.Path == sidecar.Path);
+        Assert.True(sidecarAfter.Included);
+        Assert.Equal(2, sidecarAfter.TotalUnits);
+    }
+
+    [Fact]
+    public void LocalizationTextFormatExtractsAndRoundTripsKeyValueAndLineByLineTxtFiles()
+    {
+        using var ws = new TempWorkspace();
+        string gameDir = Directory.CreateDirectory(ws.PathOf("unity-txt-game")).FullName;
+        string dataDir = Directory.CreateDirectory(Path.Combine(gameDir, "Sample_Data")).FullName;
+        Directory.CreateDirectory(Path.Combine(dataDir, "Localisation Files"));
+        Directory.CreateDirectory(Path.Combine(dataDir, "Mono", "etc", "mono"));
+        File.WriteAllBytes(Path.Combine(dataDir, "globalgamemanagers"), [0, 0, 0, 0]);
+
+        // Mono runtime internal INI with duplicate keys must be ignored cleanly
+        File.WriteAllText(Path.Combine(dataDir, "Mono", "etc", "mono", "browscap.ini"), "[sec]\na=1\na=2\n");
+        // Non-localization .txt outside localization directory must be ignored
+        File.WriteAllText(Path.Combine(dataDir, "CompletedLevels.txt"), "1|1|0|1\n");
+        // README inside localization folder must be ignored
+        File.WriteAllText(Path.Combine(dataDir, "Localisation Files", "README.txt"), "Instructions for translators\n");
+
+        // Key-Value quoted .txt with BOM, // comments, and [Section] headers
+        string kvContent =
+            "// Language File\r\n" +
+            "[Game Language File]\r\n" +
+            "languageName = \"English\"\r\n" +
+            "[Begin Translations]\r\n" +
+            "// Play Button\r\n" +
+            "1 = \"Start New Adventure\"\r\n" +
+            "// Escaped quote and newline\r\n" +
+            "2 = \"Press \\\"Enter\\\"\\nTo Continue\"\r\n";
+        byte[] bomUtf8 = [0xEF, 0xBB, 0xBF, .. System.Text.Encoding.UTF8.GetBytes(kvContent)];
+        File.WriteAllBytes(Path.Combine(dataDir, "Localisation Files", "English.txt"), bomUtf8);
+        File.WriteAllText(Path.Combine(dataDir, "Localisation Files", "ChineseSimplified.txt"), "1 = \"开始\"\r\n");
+
+        using var store = ProjectStore.Create(ws.PathOf("unity-txt-proj"), "UnityTxtGame", gameDir);
+        var svc = new ProjectService(store);
+        var scan = svc.Scan();
+
+        // Zero errors from Mono/etc/mono/browscap.ini; only English.txt active
+        Assert.DoesNotContain(scan.Diagnostics, d => d.Path.Contains("browscap.ini", StringComparison.OrdinalIgnoreCase));
+        var files = svc.ScannedFiles();
+        Assert.DoesNotContain(files, f => f.Path.Contains("CompletedLevels.txt", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(files, f => f.Path.Contains("README.txt", StringComparison.OrdinalIgnoreCase));
+
+        var enRow = files.Single(f => f.Path.EndsWith("English.txt", StringComparison.OrdinalIgnoreCase));
+        Assert.True(enRow.Included);
+        Assert.Equal("loc-txt", enRow.Format);
+
+        var zhRow = files.Single(f => f.Path.EndsWith("ChineseSimplified.txt", StringComparison.OrdinalIgnoreCase));
+        Assert.False(zhRow.Included);
+        Assert.Equal(FileQualityVerdict.SecondaryLanguage, zhRow.Verdict);
+
+        // Verify round-trip preserves BOM, comments, sections, quotes, and \r\n
+        var slots = LocalizationTextFormat.Instance.Extract(bomUtf8);
+        Assert.Contains(slots, s => s.Source == "Start New Adventure" && s.Context.Contains("Play Button"));
+        var targetSlot = slots.Single(s => s.Source == "Start New Adventure");
+        byte[] rewritten = LocalizationTextFormat.Instance.Apply(bomUtf8, new Dictionary<string, string>
+        {
+            [targetSlot.Locator] = "ابدأ مغامرة \"جديدة\""
+        });
+        Assert.Equal(0xEF, rewritten[0]);
+        Assert.Equal(0xBB, rewritten[1]);
+        Assert.Equal(0xBF, rewritten[2]);
+        string rewrittenText = System.Text.Encoding.UTF8.GetString(rewritten, 3, rewritten.Length - 3);
+        Assert.Contains("// Play Button\r\n1 = \"ابدأ مغامرة \\\"جديدة\\\"\"\r\n", rewrittenText);
+        Assert.Contains("[Begin Translations]\r\n", rewrittenText);
+
+        // Also test plain line-by-line Languages/sample.txt format
+        byte[] lineBytes = System.Text.Encoding.UTF8.GetBytes("English\r\nContinue\r\n\r\nLoad Save?\r\n");
+        var lineSlots = LocalizationTextFormat.Instance.Extract(lineBytes);
+        Assert.Equal(3, lineSlots.Count);
+        Assert.Equal("Continue", lineSlots[1].Source);
+        byte[] lineRewritten = LocalizationTextFormat.Instance.Apply(lineBytes, new Dictionary<string, string>
+        {
+            [lineSlots[1].Locator] = "متابعة"
+        });
+        Assert.Equal("English\r\nمتابعة\r\n\r\nLoad Save?\r\n", System.Text.Encoding.UTF8.GetString(lineRewritten));
+    }
+
+    [Fact]
+    public void ScanSurfacesEncryptedUnrealPakDiagnosticEvenWhenUnrelatedIniFails()
+    {
+        using var ws = new TempWorkspace();
+        string gameDir = Directory.CreateDirectory(ws.PathOf("ue-enc-game")).FullName;
+        Directory.CreateDirectory(Path.Combine(gameDir, "MyGame", "Config"));
+        Directory.CreateDirectory(Path.Combine(gameDir, "MyGame", "Content", "Paks"));
+
+        // Unreal DefaultEngine.ini with repeated keys
+        File.WriteAllText(Path.Combine(gameDir, "MyGame", "Config", "DefaultEngine.ini"),
+            "[/Script/Engine.Engine]\n+ActiveGameNameRedirects=A\n+ActiveGameNameRedirects=B\n");
+
+        // Minimal valid Unreal v11 .pak footer with bEncryptedIndex = 1
+        // v11 footer layout (204 bytes): 16-byte EncryptionKeyGuid + 1-byte bEncryptedIndex + 4-byte Magic + 4-byte Version + 8-byte IndexOffset + 8-byte IndexSize + 20-byte IndexHash + 1-byte Frozen + 160-byte CompressionMethods (5x32)
+        // Wait: standard v11 footer size is 221 bytes (16 + 1 + 4 + 4 + 8 + 8 + 20 + 160)
+        byte[] fakePak = new byte[256];
+        int footerStart = fakePak.Length - 221;
+        fakePak[footerStart + 16] = 1; // bEncryptedIndex = true
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(fakePak.AsSpan(footerStart + 17), 0x5A6F12E1u);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(fakePak.AsSpan(footerStart + 21), 11);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(fakePak.AsSpan(footerStart + 25), 0);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(fakePak.AsSpan(footerStart + 33), 32);
+        File.WriteAllBytes(Path.Combine(gameDir, "MyGame", "Content", "Paks", "pakchunk0-WindowsNoEditor.pak"), fakePak);
+
+        using var store = ProjectStore.Create(ws.PathOf("ue-enc-proj"), "UeEncGame", gameDir);
+        var scan = new ProjectService(store).Scan();
+
+        Assert.Equal(0, scan.Units);
+        Assert.Contains(scan.Diagnostics, d => d.Message.Contains("AES", StringComparison.OrdinalIgnoreCase));
+    }
 }

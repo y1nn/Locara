@@ -92,7 +92,7 @@ public sealed class ProjectService(ProjectStore store)
     }
 
     private const string LooseFiles = "loose";
-    private const string ExtractionRevision = "6";
+    private const string ExtractionRevision = "7";
 
     public static string InitialSearch(string source) => "";
     private string PackageSetting => "package:" + store.Get("source_scope");
@@ -562,14 +562,29 @@ public sealed class ProjectService(ProjectStore store)
             && f is not UnityBundleFormat
             && IsPrimaryLocaleSource(input.Key(e.Path)));
         var lazySkippedSecondary = new List<(string Path, string Hash, string FormatName, string Locale)>();
+        var lazySkippedAuxiliary = new List<(string Path, string Hash, string FormatName)>();
         var changes = new List<(string Path, string Hash, IFormatHandler Format, IReadOnlyList<TextSlot> Slots,
             Dictionary<string, string>? LegacyLocators, string? BundleLocale)>();
+
+        var primaryCandidates = new List<(ResourceEntry Resource, IFormatHandler Format, string Path)>();
+        var auxiliaryCandidates = new List<(ResourceEntry Resource, IFormatHandler Format, string Path)>();
         foreach (var resource in resources.Entries)
         {
             cancellation.ThrowIfCancellationRequested();
             var format = input.FormatFor(resource.Path);
             if (format == null) continue;
             string path = input.Key(resource.Path);
+            bool isPrimaryTrack = IsDedicatedLocalizationFormat(path, format.Name)
+                || IsExplicitLocalizationDirectory(path)
+                || (fileSelection.TryGetValue(path, out bool explicitInc) && explicitInc)
+                || userEditedPaths.Contains(path);
+            if (isPrimaryTrack) primaryCandidates.Add((resource, format, path));
+            else auxiliaryCandidates.Add((resource, format, path));
+        }
+
+        void ProcessCandidate(ResourceEntry resource, IFormatHandler format, string path, bool allowLazyAuxiliary)
+        {
+            cancellation.ThrowIfCancellationRequested();
             try
             {
                 if (earlyHasPrimaryPathLocale
@@ -582,7 +597,15 @@ public sealed class ProjectService(ProjectStore store)
                     string lazyHash = resource.Hash(cancellation);
                     lazySkippedSecondary.Add((path, lazyHash, format.Name, earlyLocale));
                     seen.Add(path);
-                    continue;
+                    return;
+                }
+
+                if (allowLazyAuxiliary)
+                {
+                    string lazyHash = resource.Hash(cancellation);
+                    lazySkippedAuxiliary.Add((path, lazyHash, format.Name));
+                    seen.Add(path);
+                    return;
                 }
 
                 string hash;
@@ -622,19 +645,69 @@ public sealed class ProjectService(ProjectStore store)
                 seen.Add(path);
             }
             catch (Exception error) when (error is IOException or FormatException or JsonException
-                or InvalidDataException or System.Xml.XmlException or YamlDotNet.Core.YamlException or ArgumentException
+                or InvalidDataException or InvalidOperationException or System.Text.DecoderFallbackException
+                or System.Xml.XmlException or YamlDotNet.Core.YamlException or ArgumentException
                 or ICSharpCode.SharpZipLib.Zip.ZipException or NotSupportedException)
             {
                 diagnostics.Add(new(path, error.Message));
             }
         }
-        if (seen.Count == 0 && diagnostics.Count == 0)
+
+        // Pass 1: Extract dedicated & explicit-localization files first so we know immediately whether
+        // official localization exists before spending time parsing thousands of auxiliary data/script files.
+        foreach (var item in primaryCandidates)
+            ProcessCandidate(item.Resource, item.Format, item.Path, allowLazyAuxiliary: false);
+
+        bool earlyHasDedicatedLoc = false;
+        if (auxiliaryCandidates.Count > 0)
+        {
+            int pass1DedicatedHuman = 0;
+            bool pass1HasEnglishBundle = changes.Any(c => IsEnglishLocaleCode(c.BundleLocale))
+                || seen.Any(p => p.EndsWith(".bundle", StringComparison.OrdinalIgnoreCase)
+                    && (p.Contains("(en)", StringComparison.OrdinalIgnoreCase)
+                        || p.Contains("english", StringComparison.OrdinalIgnoreCase)));
+            var pass1ChangedPaths = new HashSet<string>(changes.Select(c => c.Path), StringComparer.Ordinal);
+            foreach (var change in changes)
+            {
+                if (!IsDedicatedLocalizationFormat(change.Path, change.Format.Name)) continue;
+                bool isSec = (change.Format is UnityBundleFormat && pass1HasEnglishBundle && change.BundleLocale != null && !IsEnglishLocaleCode(change.BundleLocale))
+                    || (change.Format is not UnityBundleFormat && earlyHasPrimaryPathLocale && ExtractPathLocale(change.Path) is { } loc && !IsEnglishLocaleCode(loc));
+                if (isSec) continue;
+                var q = TextQualityClassifier.ClassifyFile(change.Path, change.Slots.Select(s => (s.Locator, s.Source)).ToArray(), change.Format.Name);
+                if (q.Verdict == FileQualityVerdict.Translatable || change.Format is UnityI2Format or StarTruckerCatalog)
+                    pass1DedicatedHuman += q.HumanCount;
+                if (pass1DedicatedHuman >= DedicatedLocalizationMinHumanUnits) break;
+            }
+            if (pass1DedicatedHuman < DedicatedLocalizationMinHumanUnits)
+            {
+                foreach (var (prevPath, prevInfo) in previous)
+                {
+                    if (!seen.Contains(prevPath) || pass1ChangedPaths.Contains(prevPath)) continue;
+                    if (!IsDedicatedLocalizationFormat(prevPath, prevInfo.Format)) continue;
+                    bool isSec = prevInfo.Format != "unity-bundle"
+                        && earlyHasPrimaryPathLocale
+                        && ExtractPathLocale(prevPath) is { } loc
+                        && !IsEnglishLocaleCode(loc);
+                    if (isSec) continue;
+                    pass1DedicatedHuman += store.Query(
+                        "SELECT COUNT(*) FROM units WHERE path=$p AND active IN (1, 2)",
+                        r => r.GetInt32(0), ("$p", prevPath))[0];
+                    if (pass1DedicatedHuman >= DedicatedLocalizationMinHumanUnits) break;
+                }
+            }
+            earlyHasDedicatedLoc = pass1DedicatedHuman >= DedicatedLocalizationMinHumanUnits;
+        }
+
+        // Pass 2: Process remaining non-dedicated sidecar/script files (lazy-skipping when official localization already exists).
+        foreach (var item in auxiliaryCandidates)
+            ProcessCandidate(item.Resource, item.Format, item.Path, allowLazyAuxiliary: earlyHasDedicatedLoc);
+        if (seen.Count == 0)
         {
             if (input.FormatDiagnostics.Count > 0)
             {
                 diagnostics.AddRange(input.FormatDiagnostics);
             }
-            else
+            else if (diagnostics.Count == 0)
             {
                 string message = profile.Name switch
                 {
@@ -716,6 +789,21 @@ public sealed class ProjectService(ProjectStore store)
                     """, ("$p", lazy.Path), ("$h", lazy.Hash), ("$f", lazy.FormatName));
                 advisories.Add(new(lazy.Path,
                     $"ملف لغة أخرى ({lazy.Locale}) — استُبعد تلقائياً للاكتفاء باللغة الإنجليزية وتوفير رصيدك؛ يمكنك تفعيله من تبويب «الملفات»."));
+            }
+
+            foreach (var lazyAux in lazySkippedAuxiliary)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                store.Execute("UPDATE units SET active=0 WHERE path=$p", ("$p", lazyAux.Path));
+                store.Execute("""
+                    INSERT INTO files(path,hash,format,snapshot) VALUES($p,$h,$f,X'')
+                    ON CONFLICT(path) DO UPDATE SET hash=$h,format=$f,snapshot=X'',active=1
+                    """, ("$p", lazyAux.Path), ("$h", lazyAux.Hash), ("$f", lazyAux.FormatName));
+            }
+            if (lazySkippedAuxiliary.Count > 0)
+            {
+                advisories.Add(new(input.Path,
+                    $"تم تخطي تحليل {lazySkippedAuxiliary.Count:N0} ملف بيانات/برمجة جانبي لتسريع الفحص وحماية رصيدك لوجود ملفات ترجمة رسمية؛ يمكنك تفعيل أي ملف منها من تبويب «الملفات»."));
             }
 
             foreach (var change in changes)
@@ -993,13 +1081,15 @@ public sealed class ProjectService(ProjectStore store)
                 verdict = FileQualityVerdict.SecondaryLanguage;
                 reason = $"ملف لغة إضافية ({pathLocale}) — مستبعد افتراضياً للاكتفاء بالإنجليزية وتوفير رصيدك.";
             }
-            else if (verdict != FileQualityVerdict.Technical
+            else if ((verdict != FileQualityVerdict.Technical || total == 0)
                 && hasPrimaryDedicatedLoc
                 && !IsDedicatedLocalizationFormat(filePath, format)
                 && !(IsExplicitLocalizationDirectory(filePath) && verdict == FileQualityVerdict.Translatable))
             {
                 verdict = FileQualityVerdict.AuxiliaryData;
-                reason = "ملف بيانات/إعدادات جانبي — توجد ملفات ترجمة رسمية مخصّصة في المشروع، لذا استُبعد افتراضياً لحماية اللعبة وتوفير رصيدك؛ يمكنك تفعيله عند الحاجة.";
+                reason = total == 0
+                    ? "ملف بيانات/إعدادات جانبي — تم تخطي تحليله لتسريع الفحص لوجود ملفات ترجمة رسمية في المشروع؛ فعّل الملف من مربع التضمين لاستخراج نصوصه فوراً."
+                    : "ملف بيانات/إعدادات جانبي — توجد ملفات ترجمة رسمية مخصّصة في المشروع، لذا استُبعد تلقائياً لحماية اللعبة وتوفير رصيدك؛ يمكنك تفعيله عند الحاجة.";
             }
             else if (format == "unity-i2")
             {
@@ -1032,6 +1122,10 @@ public sealed class ProjectService(ProjectStore store)
             else if (format == "xunity-autotranslator")
             {
                 reason = "ملف ترجمة XUnity.AutoTranslator (BepInEx) — مخصّص لألعاب Unity ذات النصوص المدمجة في الكود البرمجي.";
+            }
+            else if (format == "loc-txt")
+            {
+                reason = "ملف ترجمة نصي (.txt داخل مجلد اللغات) — يُحفظ بنفس البنية والتعليقات والترميز الأصلي.";
             }
             else if (format == "po" && IsGettextTemplate(filePath))
             {
@@ -2073,14 +2167,16 @@ public sealed class ProjectService(ProjectStore store)
 
     private static readonly HashSet<string> ExplicitLocalizationDirectories = new(StringComparer.OrdinalIgnoreCase)
     {
-        "localization", "localisation", "locales", "locale", "lang", "languages",
-        "i18n", "l10n", "dialogues", "dialogs", "subtitles", "captions", "tl"
+        "localization", "localisation", "localization files", "localisation files",
+        "locales", "locale", "lang", "language", "languages", "language files",
+        "translations", "translation", "i18n", "l10n", "dialogues", "dialogs", "subtitles", "captions", "tl"
     };
 
     private static readonly HashSet<string> LocalizationContextFolders = new(StringComparer.OrdinalIgnoreCase)
     {
-        "localization", "localisation", "locales", "locale", "lang", "languages",
-        "i18n", "l10n", "strings", "dialogues", "dialogs", "subtitles", "captions", "tl", "text"
+        "localization", "localisation", "localization files", "localisation files",
+        "locales", "locale", "lang", "language", "languages", "language files",
+        "translations", "translation", "i18n", "l10n", "strings", "dialogues", "dialogs", "subtitles", "captions", "tl", "text"
     };
 
     private static readonly string[] LocalizationFileStems =
@@ -2096,23 +2192,39 @@ public sealed class ProjectService(ProjectStore store)
 
     private static readonly HashSet<string> KnownLocaleCodes = new(StringComparer.OrdinalIgnoreCase)
     {
-        "en", "eng", "english", "en-us", "en-gb", "en_us", "en_gb",
+        "en", "eng", "english", "englishus", "englishuk", "en-us", "en-gb", "en_us", "en_gb",
         "de", "deu", "ger", "german", "de-de", "de_de",
         "fr", "fra", "fre", "french", "fr-fr", "fr_fr",
-        "es", "esp", "spa", "spanish", "es-es", "es-419", "es-mx", "es_es", "es_419", "es_mx",
+        "es", "esp", "spa", "spanish", "spanishlatam", "latinspanish", "es-es", "es-419", "es-mx", "es_es", "es_419", "es_mx",
         "it", "ita", "italian", "it-it", "it_it",
-        "ja", "jpn", "jp", "japanese", "ja-jp", "ja_jp",
+        "ja", "jpn", "jp", "jap", "japanese", "ja-jp", "ja_jp",
         "ko", "kor", "kr", "korean", "ko-kr", "ko_kr",
-        "pt", "por", "ptb", "pt-br", "pt-pt", "pt_br", "pt_pt", "portuguese",
+        "pt", "por", "ptb", "pt-br", "pt-pt", "pt_br", "pt_pt", "portuguese", "brazilianportuguese", "brazportuguese",
         "ru", "rus", "russian", "ru-ru", "ru_ru",
-        "zh", "zho", "zhs", "zht", "chs", "cht", "zh-cn", "zh-tw", "zh_cn", "zh_tw", "zh-hans", "zh-hant", "zh_hans", "zh_hant", "chinese",
+        "zh", "zho", "zhs", "zht", "chs", "cht", "zh-cn", "zh-tw", "zh_cn", "zh_tw", "zh-hans", "zh-hant", "zh_hans", "zh_hant",
+        "chinese", "chinesesimplified", "chinesetraditional", "chinesehongkong", "simplifiedchinese", "traditionalchinese",
         "pl", "pol", "polish", "tr", "tur", "turkish", "th", "tha", "thai",
         "nl", "nld", "dutch", "sv", "swe", "swedish", "da", "dan", "danish",
-        "fi", "fin", "finnish", "no", "nor", "nb", "norwegian",
+        "fi", "fin", "finn", "finnish", "no", "nor", "nb", "norwegian",
         "cs", "ces", "cze", "czech", "hu", "hun", "hungarian", "ro", "ron", "romanian",
         "uk", "ukr", "ukrainian", "vi", "vie", "vietnamese", "id", "ind", "indonesian",
         "ar", "ara", "arabic", "he", "heb", "hebrew", "el", "ell", "greek", "hi", "hin", "bg", "bul"
     };
+
+    private static bool IsKnownLocaleToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return false;
+        if (KnownLocaleCodes.Contains(token)) return true;
+        int sep = token.IndexOfAny(['_', '-']);
+        if (sep is 2 or 3 && token.LastIndexOfAny(['_', '-']) == sep)
+        {
+            string lang = token[..sep];
+            string region = token[(sep + 1)..];
+            if (KnownLocaleCodes.Contains(lang) && region.Length is >= 2 and <= 4 && region.All(char.IsLetterOrDigit))
+                return true;
+        }
+        return false;
+    }
 
     private static string StripContainerPrefix(string resourcePath)
     {
@@ -2122,7 +2234,7 @@ public sealed class ProjectService(ProjectStore store)
 
     internal static bool IsDedicatedLocalizationFormat(string resourcePath, string formatName)
     {
-        if (formatName is "po" or "strings" or "unreal-locres" or "unreal-stringtable" or "unreal-pak" or "unity-i2" or "unity-bundle"
+        if (formatName is "po" or "strings" or "loc-txt" or "unreal-locres" or "unreal-stringtable" or "unreal-pak" or "unity-i2" or "unity-bundle"
             or "godot-translation" or "renpy-template" or "xunity-autotranslator" or "star-trucker-catalog")
             return true;
         if (formatName == "xml/xliff")
@@ -2131,7 +2243,7 @@ public sealed class ProjectService(ProjectStore store)
             return ext.Equals(".xlf", StringComparison.OrdinalIgnoreCase)
                 || ext.Equals(".xliff", StringComparison.OrdinalIgnoreCase);
         }
-        return false;
+        return IsExplicitLocalizationDirectory(resourcePath) && IsPrimaryLocaleSource(resourcePath);
     }
 
     internal static bool IsExplicitLocalizationDirectory(string resourcePath)
@@ -2218,29 +2330,29 @@ public sealed class ProjectService(ProjectStore store)
         for (int i = 0; i < parts.Length - 1; i++)
         {
             string seg = parts[i];
-            if (KnownLocaleCodes.Contains(seg))
+            if (IsKnownLocaleToken(seg))
                 return seg;
         }
         string fileNoExt = Path.GetFileNameWithoutExtension(p);
-        if (KnownLocaleCodes.Contains(fileNoExt))
+        if (IsKnownLocaleToken(fileNoExt))
             return fileNoExt;
 
         int dot = fileNoExt.LastIndexOf('.');
         if (dot >= 0 && dot + 1 < fileNoExt.Length)
         {
             string suffix = fileNoExt[(dot + 1)..];
-            if (KnownLocaleCodes.Contains(suffix))
+            if (IsKnownLocaleToken(suffix))
                 return suffix;
         }
 
         string[] tokens = fileNoExt.Split(['_', '-', '.'], StringSplitOptions.RemoveEmptyEntries);
         if (tokens.Length >= 2)
         {
-            // Compound BCP-47 locale pairs (e.g. zh_cn, pt_br, en_us, zh-hans) are unambiguous anywhere in the filename.
+            // Compound BCP-47 locale pairs (e.g. zh_cn, pt_br, en_us, zh-hans, pl_pl) are unambiguous anywhere in the filename.
             for (int i = tokens.Length - 2; i >= 0; i--)
             {
                 string pair = tokens[i] + "_" + tokens[i + 1];
-                if (KnownLocaleCodes.Contains(pair))
+                if (IsKnownLocaleToken(pair))
                     return pair;
             }
 

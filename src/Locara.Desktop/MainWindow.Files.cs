@@ -72,7 +72,7 @@ public partial class MainWindow
         {
             get
             {
-                if (!included && summary.TotalUnits == 0 && summary.Verdict == FileQualityVerdict.SecondaryLanguage)
+                if (!included && summary.TotalUnits == 0 && summary.Verdict is FileQualityVerdict.SecondaryLanguage or FileQualityVerdict.AuxiliaryData)
                     return "مُتخطّى";
                 if (included && humanOnlyFilter && includedUnits < summary.TotalUnits)
                     return $"{includedUnits:N0}/{summary.TotalUnits:N0} (بشري)";
@@ -282,7 +282,9 @@ public partial class MainWindow
         SelectedFileSamplesText.Text = row.Samples.Count == 0
             ? (row.Verdict == FileQualityVerdict.SecondaryLanguage && !row.Included
                 ? "(تم تخطي تحليل ملف اللغة الإضافية لتسريع الفحص وتوفير الذاكرة — فعّل الملف من مربع التضمين لاستخراج نصوصه فوراً)"
-                : "(لا توجد نصوص مستخرجة في هذا الملف)")
+                : row.Verdict == FileQualityVerdict.AuxiliaryData && !row.Included
+                    ? "(تم تخطي تحليل الملف الجانبي لتسريع الفحص لوجود ملفات ترجمة رسمية — فعّل الملف من مربع التضمين لاستخراج نصوصه فوراً)"
+                    : "(لا توجد نصوص مستخرجة في هذا الملف)")
             : string.Join('\n', row.Samples.Select((s, i) => $"{i + 1}. {s}"));
 
         if (IncludeHumanOnlyButton != null)

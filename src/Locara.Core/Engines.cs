@@ -27,7 +27,7 @@ public static class Engines
         @"(?:^|/)[^/]+_Data/(?:RuntimeInitializeOnLoads\.json|ScriptingAssemblies\.json|boot\.config|app\.info|StreamingAssets/aa/(?:settings|catalog)\.json|StreamingAssets/aa/AddressablesLink/link\.xml|(?:il2cpp_data|Managed|Plugins)/.+)$"
         + @"|(?:^|/)[^/]+_BackUpThisFolder_ButDontShipItWithYourGame/.+"
         + @"|(?:^|/)[^/]*(?:_monoscripts_|localization-assets-shared|localization-locales|unitybuiltinshaders|duplicateassetisolation)[^/]*\.bundle$"
-        + @"|(?:^|/)(?:MonoBleedingEdge|_CommonRedist|Redist|DirectX|vcredist|EasyAntiCheat|BattlEye|CrashHandler|steam_settings)/.+|"
+        + @"|(?:^|/)(?:MonoBleedingEdge|Mono/etc|_CommonRedist|Redist|DirectX|vcredist|EasyAntiCheat|BattlEye|CrashHandler|steam_settings)/.+|"
         + @"(?:^|/)UnityCrashHandler[^/]*$"
         + @"|(?:^|/)(?:Locara_Arabic_P|[^/]+_Locara_P)\.pak$"
         + @"|(?:^|/)Engine/Config/StagedBuild_[^/]+\.ini$"

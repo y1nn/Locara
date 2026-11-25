@@ -12,7 +12,7 @@ namespace Locara.Core;
 
 public static class Formats
 {
-    public static IReadOnlyList<IFormatHandler> All { get; } = [new JsonFormat(), new DelimitedFormat(','), new DelimitedFormat('\t'), new XmlFormat(), new IniFormat(), new YamlFormat(), TomlFormat.Instance, StringsFormat.Instance, LuaFormat.Instance, new PoFormat(), new SpreadsheetFormat(), new RenpyFormat(), new UnityBundleFormat(), UnityI2Format.Instance, UnityAssetsFormat.Instance, UnrealLocresFormat.Instance, UnrealStringTableFormat.Instance, UnrealPakFormat.Instance, GodotTranslationFormat.Instance, XUnityTranslationFormat.Instance];
+    public static IReadOnlyList<IFormatHandler> All { get; } = [new JsonFormat(), new DelimitedFormat(','), new DelimitedFormat('\t'), new XmlFormat(), new IniFormat(), new YamlFormat(), TomlFormat.Instance, StringsFormat.Instance, LuaFormat.Instance, new PoFormat(), new SpreadsheetFormat(), new RenpyFormat(), new UnityBundleFormat(), UnityI2Format.Instance, UnityAssetsFormat.Instance, UnrealLocresFormat.Instance, UnrealStringTableFormat.Instance, UnrealPakFormat.Instance, GodotTranslationFormat.Instance, XUnityTranslationFormat.Instance, LocalizationTextFormat.Instance];
     internal static bool IsArabicTarget(string? language) => string.IsNullOrWhiteSpace(language)
         || language.Split('-', '_')[0].Equals("ar", StringComparison.OrdinalIgnoreCase)
         || language.Equals("arabic", StringComparison.OrdinalIgnoreCase);
@@ -83,7 +83,14 @@ public sealed class JsonFormat : IFormatHandler
     private static JsonNode? ParseNode(byte[] bytes)
     {
         ReadOnlySpan<byte> payload = HasUtf8Bom(bytes) ? bytes.AsSpan(3) : bytes.AsSpan();
-        return JsonNode.Parse(payload, nodeOptions: null, documentOptions: ParseOptions);
+        try
+        {
+            return JsonNode.Parse(payload, nodeOptions: null, documentOptions: ParseOptions);
+        }
+        catch (InvalidOperationException error)
+        {
+            throw new InvalidDataException("ملف JSON يحتوي على ترميز UTF-8 غير صالح.", error);
+        }
     }
     private static void Walk(JsonNode? node, string path, Action<string, string> found)
     {
@@ -93,7 +100,16 @@ public sealed class JsonFormat : IFormatHandler
     }
     public IReadOnlyList<TextSlot> Extract(byte[] bytes)
     {
-        var result = new List<TextSlot>(); Walk(ParseNode(bytes), "", (p, s) => result.Add(new(p, s, p))); return result;
+        try
+        {
+            var result = new List<TextSlot>();
+            Walk(ParseNode(bytes), "", (p, s) => result.Add(new(p, s, p)));
+            return result;
+        }
+        catch (InvalidOperationException error)
+        {
+            throw new InvalidDataException("ملف JSON يحتوي على ترميز UTF-8 غير صالح.", error);
+        }
     }
     public byte[] Apply(byte[] bytes, IReadOnlyDictionary<string,string> translations)
     {
