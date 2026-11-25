@@ -358,8 +358,55 @@ public sealed partial class ProjectService(ProjectStore store)
                     ? "تُحفظ ملفات الترجمة بترميز UTF-8؛ يعتمد عرض الحروف العربية المتصلة على دعم الخط المستخدم داخل اللعبة."
                     : "");
         }
+        if (!hasText && profile.Name == "generic")
+        {
+            var customArchives = FindProprietaryArchives(index.Entries);
+            if (customArchives.Count > 0)
+            {
+                return new(profile.Name, "", false, scanned, GameLaunch.None,
+                    $"يحتوي المجلد على حزم ثنائية مخصّصة ({string.Join("، ", customArchives)}) بلا ملفات ترجمة مفتوحة — يُرجّح أن اللعبة تستخدم محركاً خاصاً.", "");
+            }
+            return new(profile.Name, "", false, scanned, GameLaunch.None,
+                "لم يُعثر على ملفات نصية مدعومة في هذا المصدر.", "");
+        }
+
         return new(profile.Name, "", hasText, scanned, hasText && isSteamGame ? GameLaunch.Steam : GameLaunch.None,
             "صدّر الموارد المعاد بناؤها أو ثبّتها مباشرة داخل اللعبة. افتح إعداد الاستخراج لاختيار الحقول أو الأعمدة.", "");
+    }
+
+    private static readonly HashSet<string> ExplicitProprietaryArchiveExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".pack", ".vpk", ".bsa", ".ba2", ".arc", ".wad", ".forge", ".rpf", ".cas", ".big", ".rpa"
+    };
+
+    private static readonly HashSet<string> GenericBinaryArchiveExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".pak", ".dat", ".bin", ".blob", ".res"
+    };
+
+    internal static IReadOnlyList<string> FindProprietaryArchives(IReadOnlyList<ResourceEntry> entries)
+    {
+        var candidates = new List<(string Name, long Size)>();
+        foreach (var entry in entries)
+        {
+            string norm = entry.Path.Replace('\\', '/');
+            if (norm.Contains("/Mono/", StringComparison.OrdinalIgnoreCase)
+                || norm.Contains("/MonoBleedingEdge/", StringComparison.OrdinalIgnoreCase)
+                || norm.StartsWith("Engine/", StringComparison.OrdinalIgnoreCase))
+                continue;
+            string ext = Path.GetExtension(norm);
+            if (ext.Length == 0) continue;
+            bool isExplicit = ExplicitProprietaryArchiveExtensions.Contains(ext) && entry.Size >= 64 * 1024;
+            bool isLargeBinary = GenericBinaryArchiveExtensions.Contains(ext) && entry.Size >= 1024 * 1024;
+            if (!isExplicit && !isLargeBinary) continue;
+            candidates.Add((Path.GetFileName(norm), entry.Size));
+        }
+        return candidates
+            .OrderByDescending(c => c.Size)
+            .Select(c => c.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(3)
+            .ToList();
     }
 
     public void SelectPackage(string? package)

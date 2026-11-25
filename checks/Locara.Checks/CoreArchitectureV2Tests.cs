@@ -206,6 +206,31 @@ public sealed class CoreArchitectureV2Tests
     }
 
     [Fact]
+    public void CustomEngineProprietaryPackArchiveReportsClearArabicDiagnostic()
+    {
+        using var ws = new TempWorkspace();
+        string gameDir = Directory.CreateDirectory(ws.PathOf("custom-engine-game")).FullName;
+        byte[] customPack = new byte[128 * 1024];
+        Encoding.ASCII.GetBytes("CUSTPACK").CopyTo(customPack, 0);
+        File.WriteAllBytes(Path.Combine(gameDir, "data.pack"), customPack);
+        File.WriteAllBytes(Path.Combine(gameDir, "game.exe"), "MZ\0\0"u8.ToArray());
+
+        using var store = ProjectStore.Create(ws.PathOf("custom-engine-proj"), "CustomGame", gameDir);
+        var svc = new ProjectService(store);
+
+        var caps = svc.Capabilities();
+        Assert.False(caps.CanRead);
+        Assert.Contains("data.pack", caps.Deployment, StringComparison.Ordinal);
+        Assert.Contains("محركاً خاصاً", caps.Deployment, StringComparison.Ordinal);
+
+        var scan = svc.Scan();
+        Assert.Equal(0, scan.Units);
+        Assert.Contains(scan.Diagnostics, d =>
+            d.Message.Contains("data.pack", StringComparison.Ordinal)
+            && d.Message.Contains("محركاً خاصاً", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void IniFormatSupportsRepeatedKeysLosslesslyWhilePreservingSingleKeyCompatibility()
     {
         var ini = new IniFormat();
