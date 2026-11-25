@@ -376,10 +376,11 @@
         <!-- Selected File Sample Preview -->
         <Border Grid.Row="3" Style="{StaticResource SubtleCardBorderStyle}" Margin="0,8,0,0">
          <StackPanel>
-          <DockPanel Margin="0,0,0,3">
-           <Button x:Name="IncludeHumanOnlyButton" DockPanel.Dock="Left" Content="تفعيل النصوص البشرية فقط في هذا الملف" Click="IncludeHumanOnlySelectedFile" Visibility="Collapsed" FontSize="11.5" Padding="10,4"/>
-           <TextBlock x:Name="SelectedFilePathText" Text="اختر ملفاً من الجدول أعلاه لمعاينة أول 5 نصوص فيه قبل الترجمة." FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-          </DockPanel>
+          <Grid Margin="0,0,0,3">
+           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+           <TextBlock Grid.Column="0" x:Name="SelectedFilePathText" Text="اختر ملفاً من الجدول أعلاه لمعاينة أول 5 نصوص فيه قبل الترجمة." FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,8,0"/>
+           <Button Grid.Column="1" x:Name="IncludeHumanOnlyButton" Content="تفعيل النصوص البشرية فقط في هذا الملف" Click="IncludeHumanOnlySelectedFile" Visibility="Collapsed" FontSize="11.5" Padding="10,4" Margin="0"/>
+          </Grid>
           <TextBlock x:Name="SelectedFileReasonText" FontSize="12" TextWrapping="Wrap" Margin="0,1,0,4"/>
           <TextBox x:Name="SelectedFileSamplesText" FlowDirection="LeftToRight" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent" FontSize="12" Foreground="{DynamicResource TextSecondary}" MaxHeight="84" VerticalScrollBarVisibility="Auto" Padding="0"/>
          </StackPanel>
@@ -562,7 +563,7 @@
           <Border x:Name="OverviewUsageCard" Style="{StaticResource SubtleCardBorderStyle}" Margin="5,0,0,0" Cursor="Hand" MouseLeftButtonUp="OpenUsagePanel" ToolTip="انقر لفتح سجل الاستهلاك وأسعار النماذج">
            <StackPanel>
             <TextBlock Text="تكلفة المشروع التراكمية" FontSize="11.5" Foreground="{DynamicResource TextSecondary}"/>
-            <TextBlock x:Name="OverviewTotalCost" Text="$0.00" FlowDirection="LeftToRight" HorizontalAlignment="Right" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource AccentIndicator}" Margin="0,2,0,0"/>
+            <TextBlock x:Name="OverviewTotalCost" Text="$0.00" FlowDirection="LeftToRight" HorizontalAlignment="Left" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource AccentIndicator}" Margin="0,2,0,0"/>
             <TextBlock x:Name="OverviewTotalRequests" Text="0 طلب مسجّل" FontSize="11" Foreground="{DynamicResource TextMuted}" TextTrimming="CharacterEllipsis"/>
             <TextBlock x:Name="OverviewTotalTokens" Visibility="Collapsed"/>
             <TextBlock x:Name="OverviewTokensBreakdown" Visibility="Collapsed"/>
@@ -632,7 +633,7 @@
               <DataTemplate>
                <Border Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="7" Padding="10,7" Margin="0,0,0,6">
                 <StackPanel>
-                 <TextBlock Text="{Binding Section}" FlowDirection="LeftToRight" HorizontalAlignment="Right" FontSize="10.5" Foreground="{DynamicResource TextMuted}"/>
+                 <TextBlock Text="{Binding Section}" FlowDirection="LeftToRight" HorizontalAlignment="Left" FontSize="10.5" Foreground="{DynamicResource TextMuted}"/>
                  <TextBlock Text="{Binding Source}" FlowDirection="LeftToRight" TextWrapping="Wrap" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,2,0,3"/>
                  <TextBlock Text="{Binding Target}" FlowDirection="RightToLeft" TextWrapping="Wrap" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}"/>
                 </StackPanel>
@@ -663,20 +664,18 @@
            <!-- Bot Auto-Discovered Glossary -->
            <Border Grid.Column="0" Style="{StaticResource SubtleCardBorderStyle}">
             <StackPanel>
-             <DockPanel Margin="0,0,0,6">
-              <TextBlock Text="مصطلحات مكتشفة تلقائياً (ذاكرة البوتات)" FontWeight="SemiBold" DockPanel.Dock="Right"/>
-              <Button x:Name="ClearBotTermsBtn" Content="مسح التلقائي" Click="ClearBotGlossaryClick" Style="{StaticResource GhostButtonStyle}" FontSize="11.5" Padding="8,3" HorizontalAlignment="Left"/>
-             </DockPanel>
+             <Grid Margin="0,0,0,6">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <TextBlock Grid.Column="0" Text="مصطلحات مكتشفة تلقائياً (ذاكرة البوتات)" FontWeight="SemiBold" VerticalAlignment="Center"/>
+              <Button Grid.Column="1" x:Name="ClearBotTermsBtn" Content="مسح التلقائي" Click="ClearBotGlossaryClick" Style="{StaticResource GhostButtonStyle}" FontSize="11.5" Padding="8,3" Margin="0"/>
+             </Grid>
              <TextBlock x:Name="BotTermsEmptyText" Text="لم تُسجّل مصطلحات تلقائية بعد — يكتشفها بوت الكشّاف وبوتات المشاهد أثناء الترجمة." FontSize="12" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" Margin="0,0,0,6"/>
              <ListBox x:Name="BotTermsList" MaxHeight="220">
               <ListBox.ItemTemplate>
                <DataTemplate>
-                <DockPanel>
-                 <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
-                  <Button Content="★ تثبيت" Tag="{Binding Source}" Click="PromoteBotTermClick" FontSize="11" Padding="8,3" ToolTip="ترقية المصطلح إلى معجمك اليدوي المعتمد"/>
-                  <Button Content="✕" Tag="{Binding Source}" Click="RemoveBotTermClick" Style="{StaticResource GhostButtonStyle}" FontSize="11" Padding="6,3" Margin="0"/>
-                 </StackPanel>
-                 <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
+                <Grid>
+                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                 <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,8,0">
                   <WrapPanel>
                    <TextBlock Text="{Binding Source}" FlowDirection="LeftToRight" FontWeight="SemiBold" Margin="0,0,8,0"/>
                    <TextBlock Text="←" Foreground="{DynamicResource TextMuted}" Margin="0,0,8,0"/>
@@ -684,7 +683,11 @@
                    <TextBlock Text="{Binding OriginLabel}" FontSize="10.5" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
                   </WrapPanel>
                  </StackPanel>
-                </DockPanel>
+                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                  <Button Content="★ تثبيت" Tag="{Binding Source}" IsEnabled="{Binding CanMutate}" Click="PromoteBotTermClick" FontSize="11" Padding="8,3" ToolTip="ترقية المصطلح إلى معجمك اليدوي المعتمد"/>
+                  <Button Content="✕" Tag="{Binding Source}" IsEnabled="{Binding CanMutate}" Click="RemoveBotTermClick" Style="{StaticResource GhostButtonStyle}" FontSize="11" Padding="6,3" Margin="0"/>
+                 </StackPanel>
+                </Grid>
                </DataTemplate>
               </ListBox.ItemTemplate>
              </ListBox>
@@ -751,16 +754,17 @@
 
       <!-- Smart Drafts Action Strip (Shown when review drafts exist) -->
       <Border x:Name="DraftsActionPanel" Grid.Row="0" Background="{DynamicResource WarningBg}" BorderBrush="{DynamicResource WarningFg}" BorderThickness="1" CornerRadius="9" Padding="14,10" Margin="0,0,0,10" Visibility="Collapsed">
-       <DockPanel>
-        <WrapPanel DockPanel.Dock="Left" VerticalAlignment="Center">
-         <Button Content="تدقيق المسودات بالبوت المدقق" Click="ReviewDraftsWithAi"/>
-         <Button Content="اعتماد كل السليمة دفعة واحدة" Click="ApproveAllDrafts" Margin="0"/>
-        </WrapPanel>
-        <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+       <Grid>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,12,0">
          <TextBlock x:Name="DraftsActionTitle" FontWeight="Bold" Foreground="{DynamicResource WarningFg}"/>
          <TextBlock Text="يمكنك تدقيق المسودات آلياً عبر البوت المدقق أو اعتماد السليمة منها بنقرة واحدة." FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
         </StackPanel>
-       </DockPanel>
+        <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+         <Button Content="تدقيق المسودات بالبوت المدقق" Click="ReviewDraftsWithAi"/>
+         <Button Content="اعتماد كل السليمة دفعة واحدة" Click="ApproveAllDrafts" Margin="0"/>
+        </WrapPanel>
+       </Grid>
       </Border>
 
       <!-- Clean Search, Status Chips & Toolbar -->
@@ -889,10 +893,11 @@
 
           <!-- Protected Tokens Bar (Clickable to insert at cursor) -->
           <StackPanel x:Name="InspectorTokensContainer" Visibility="Collapsed" Margin="0,0,0,8">
-           <DockPanel Margin="0,0,0,4">
-            <TextBlock Text="الرموز المحمية (انقر للإدراج):" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" DockPanel.Dock="Right"/>
-            <TextBlock x:Name="InspectorTokenStatusText" FontSize="11.5" FontWeight="SemiBold" HorizontalAlignment="Left"/>
-           </DockPanel>
+           <Grid Margin="0,0,0,4">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="الرموز المحمية (انقر للإدراج):" FontSize="11.5" Foreground="{DynamicResource TextSecondary}"/>
+            <TextBlock Grid.Column="1" x:Name="InspectorTokenStatusText" FontSize="11.5" FontWeight="SemiBold"/>
+           </Grid>
            <ItemsControl x:Name="InspectorTokensList">
             <ItemsControl.ItemsPanel>
              <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
@@ -1142,10 +1147,11 @@
 
            <StackPanel x:Name="ModelPicker" Margin="0,0,0,10">
             <TextBlock Text="النموذج الافتراضي لهذا الاتصال" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,3"/>
-            <DockPanel>
-             <Button x:Name="FetchModelsButton" DockPanel.Dock="Left" Content="جلب النماذج" Click="FetchModels" Margin="0,0,8,0"/>
-             <ComboBox x:Name="Model" IsEditable="True" IsTextSearchEnabled="True" MaxDropDownHeight="260" FlowDirection="LeftToRight" AutomationProperties.Name="النموذج"/>
-            </DockPanel>
+            <Grid>
+             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+             <ComboBox Grid.Column="0" x:Name="Model" IsEditable="True" IsTextSearchEnabled="True" MaxDropDownHeight="260" FlowDirection="LeftToRight" Margin="0,2,8,2" AutomationProperties.Name="النموذج"/>
+             <Button Grid.Column="1" x:Name="FetchModelsButton" Content="جلب النماذج" Click="FetchModels" Margin="0"/>
+            </Grid>
             <TextBlock x:Name="ModelListStatus" Visibility="Collapsed" FontSize="11.5" Foreground="{DynamicResource AccentIndicator}" Margin="0,4,0,0" TextWrapping="Wrap"/>
            </StackPanel>
           </StackPanel>
@@ -1294,7 +1300,7 @@
           <Border Style="{StaticResource SubtleCardBorderStyle}" Margin="3,0">
            <StackPanel>
             <TextBlock Text="إجمالي التكلفة التقديرية" FontSize="11.5" Foreground="{DynamicResource TextSecondary}"/>
-            <TextBlock x:Name="UsageSummaryCost" Text="$0.00" FlowDirection="LeftToRight" HorizontalAlignment="Right" FontSize="20" FontWeight="Bold" Foreground="{DynamicResource SuccessFg}" Margin="0,2,0,0"/>
+            <TextBlock x:Name="UsageSummaryCost" Text="$0.00" FlowDirection="LeftToRight" HorizontalAlignment="Left" FontSize="20" FontWeight="Bold" Foreground="{DynamicResource SuccessFg}" Margin="0,2,0,0"/>
             <TextBlock x:Name="UsageSummaryCostHint" Text="تقديري حسب أسعار النماذج" FontSize="11" Foreground="{DynamicResource TextMuted}"/>
            </StackPanel>
           </Border>

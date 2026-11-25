@@ -446,8 +446,6 @@ public sealed class TranslationTeam(ProjectStore store)
         var liveGlossary = new LiveGlossary(plan.Glossary, store.BotGlossary());
         var existingSupervisor = ReadSupervisor(store, plan.Id);
         string worldBrief = existingSupervisor.WorldBrief ?? "";
-        if (existingSupervisor.AutoGlossary is { Count: > 0 })
-            liveGlossary.TryAddBotTerms(existingSupervisor.AutoGlossary);
 
         Dictionary<string, Assignment> assignments = existingSupervisor.Sections ?? new(StringComparer.Ordinal);
         if (!fastMode && plan.UseSupervisor)

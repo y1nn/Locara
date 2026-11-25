@@ -233,4 +233,123 @@ public sealed class StudioUiHelpersTests
         Assert.NotNull(resumedPayload);
         Assert.Contains("مصهر النجوم", resumedPayload!);
     }
+
+    [Fact]
+    public void UnitNotifiesPropertyChangedOnTargetStatusAndWarning()
+    {
+        var unit = new Unit { Id = "id1", Path = "ui.json", Locator = "/play", Source = "Play", Status = "pending" };
+        var changedProps = new List<string>();
+        unit.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != null) changedProps.Add(e.PropertyName);
+        };
+
+        unit.Target = "العب";
+        unit.Status = "approved";
+        unit.Warning = "تنبيه";
+
+        Assert.Contains(nameof(Unit.Target), changedProps);
+        Assert.Contains(nameof(Unit.Status), changedProps);
+        Assert.Contains(nameof(Unit.Warning), changedProps);
+    }
+
+    [Fact]
+    public async Task RemovedBotTermDoesNotReturnFromCachedSupervisorJsonOnResume()
+    {
+        using var ws = new TempWorkspace();
+        string gameDir = Directory.CreateDirectory(ws.PathOf("Game")).FullName;
+        var sb = new StringBuilder("{");
+        for (int i = 1; i <= 12; i++)
+        {
+            if (i > 1) sb.Append(',');
+            sb.Append($"\"line_{i:00}\":\"Visit Crimson Keep gate {i}.\"");
+        }
+        sb.Append('}');
+        File.WriteAllText(Path.Combine(gameDir, "dialogue.json"), sb.ToString(), Encoding.UTF8);
+
+        string projectDir = ws.PathOf("team-remove.locara");
+        using var store = ProjectStore.Create(projectDir, "KeepGame", gameDir);
+        new ProjectService(store).Scan();
+
+        var options = new ProviderOptions("openai-compatible", "test-model", "test-key", BaseUrl: "http://127.0.0.1:11434/v1", BatchSize: 6, MaxCharacters: 500000, MaxRequests: 100);
+        var settings = new TeamSettings(Workers: 1, BatchSize: 6, SmartReview: true);
+        var team = new TranslationTeam(store);
+        var plan = team.Capture(store.Units(limit: -1, status: "pending"), options, settings);
+
+        using var cts = new CancellationTokenSource();
+        int translateCalls = 0;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await team.Run(plan, options, progress: null, cts.Token, send: (req, ct) =>
+            {
+                if (req.Role == "supervisor")
+                {
+                    return Task.FromResult("""
+                        {"worldBrief":"عالم القلعة.","glossary":{"Crimson Keep":"الحصن القرمزي الخاطئ"},"sections":{}}
+                        """);
+                }
+                if (req.Role == "translator")
+                {
+                    if (Interlocked.Increment(ref translateCalls) >= 2)
+                    {
+                        cts.Cancel();
+                        ct.ThrowIfCancellationRequested();
+                    }
+                    using var doc = System.Text.Json.JsonDocument.Parse(req.Data);
+                    var map = new Dictionary<string, string>();
+                    foreach (var entry in doc.RootElement.GetProperty("entries").EnumerateArray())
+                        map[entry.GetProperty("id").GetString()!] = "زر البوابة.";
+                    return Task.FromResult(System.Text.Json.JsonSerializer.Serialize(new { translations = map }));
+                }
+                using var rdoc = System.Text.Json.JsonDocument.Parse(req.Data);
+                var rev = new Dictionary<string, object>();
+                foreach (var entry in rdoc.RootElement.GetProperty("entries").EnumerateArray())
+                    rev[entry.GetProperty("id").GetString()!] = new { ok = true, reason = "", suggestion = "" };
+                return Task.FromResult(System.Text.Json.JsonSerializer.Serialize(rev));
+            }, approveReviewed: true);
+        });
+
+        // User deletes the bad bot-inferred term while paused
+        store.RemoveBotTerm("Crimson Keep");
+        Assert.Empty(store.BotGlossaryEntries());
+
+        string? resumedTranslatorPayload = null;
+        await team.Run(team.Latest!, options, progress: null, send: (req, _) =>
+        {
+            if (req.Role == "translator")
+            {
+                resumedTranslatorPayload = req.Data;
+                using var doc = System.Text.Json.JsonDocument.Parse(req.Data);
+                var map = new Dictionary<string, string>();
+                foreach (var entry in doc.RootElement.GetProperty("entries").EnumerateArray())
+                    map[entry.GetProperty("id").GetString()!] = "زر البوابة.";
+                return Task.FromResult(System.Text.Json.JsonSerializer.Serialize(new { translations = map }));
+            }
+            using var rdoc = System.Text.Json.JsonDocument.Parse(req.Data);
+            var rev = new Dictionary<string, object>();
+            foreach (var entry in rdoc.RootElement.GetProperty("entries").EnumerateArray())
+                rev[entry.GetProperty("id").GetString()!] = new { ok = true, reason = "", suggestion = "" };
+            return Task.FromResult(System.Text.Json.JsonSerializer.Serialize(rev));
+        }, approveReviewed: true);
+
+        Assert.NotNull(resumedTranslatorPayload);
+        Assert.DoesNotContain("الحصن القرمزي الخاطئ", resumedTranslatorPayload!);
+    }
+
+    [Fact]
+    public void StudioXamlDefinesDarkSafeTemplatesAndAvoidsInvertedRtlDockPanels()
+    {
+        string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        string stylesXaml = File.ReadAllText(Path.Combine(repoRoot, "src", "Locara.Desktop", "Styles", "StudioStyles.xaml"));
+        string mainXaml = File.ReadAllText(Path.Combine(repoRoot, "src", "Locara.Desktop", "MainWindow.xaml"));
+
+        Assert.Contains("TargetType=\"DataGridColumnHeader\"", stylesXaml);
+        Assert.Contains("ControlTemplate TargetType=\"DataGridColumnHeader\"", stylesXaml);
+        Assert.Contains("ControlTemplate TargetType=\"MenuItem\"", stylesXaml);
+        Assert.Contains("TargetType=\"ContextMenu\"", stylesXaml);
+
+        // No horizontal DockPanel.Dock="Left" or "Right" inside MainWindow.xaml (which invert under RTL)
+        Assert.DoesNotContain("DockPanel.Dock=\"Right\"", mainXaml);
+        Assert.DoesNotContain("DockPanel.Dock=\"Left\"", mainXaml);
+    }
 }

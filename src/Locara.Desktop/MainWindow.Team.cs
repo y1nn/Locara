@@ -513,6 +513,8 @@ public partial class MainWindow
             CharacterBudget.Text = estimate.Characters.ToString();
             RequestBudget.Text = estimate.Requests.ToString();
             UnlimitedBudget.IsChecked = false;
+            UpdateBudgetCapBadge();
+            PersistProfilesFile();
             Status.Text = "حُسبت الحدود التقديرية للاستئناف. يمكنك تعديلها أو تفعيل «بلا سقف».";
         }
         catch (Exception error) { if (path == projectPath) Status.Text = error.Message; }
@@ -635,7 +637,7 @@ public partial class MainWindow
         if (LoreBotBadge != null)
         {
             LoreBotBadge.Text = !fastMode && plan.UseSupervisor ? "يحلّل الآن ●" : "مسرد محفوظ";
-            LoreBotBadge.Foreground = ResBrush("AccentIndicator");
+            LoreBotBadge.SetResourceReference(TextBlock.ForegroundProperty, "AccentIndicator");
         }
 
         if (!fastMode && plan.UseSupervisor)
@@ -846,9 +848,11 @@ public partial class MainWindow
             LiveActiveAgentsText.Text = $"{activeNow} / {workers}";
             if (act.WorkerId == 0 && LoreBotBadge != null)
             {
-                LoreBotBadge.Text = act.Stage;
-                LoreBotBadge.Foreground = ResBrush(act.Stage == "مكتمل" ? "SuccessFg" : "AccentIndicator");
+                bool scoutDone = act.Stage is "انتهى" or "مكتمل";
+                LoreBotBadge.Text = scoutDone ? "جاهز ✓" : act.Stage;
+                LoreBotBadge.SetResourceReference(TextBlock.ForegroundProperty, scoutDone ? "SuccessFg" : "AccentIndicator");
                 if (LoreBotDetail != null) LoreBotDetail.Text = act.Detail;
+                if (scoutDone) _ = ReloadLoreAndGlossariesAsync();
             }
             AppendLiveSample(act.Section, act.SampleSource, act.SampleTarget);
             string modelTag = string.IsNullOrWhiteSpace(row.ModelLabel) ? "" : $" [{row.ModelLabel}]";

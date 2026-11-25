@@ -391,6 +391,7 @@ public partial class MainWindow:Window
         RoutingPanel.IsEnabled = !running;
         if (GlossaryEditControls != null) GlossaryEditControls.IsEnabled = !running;
         if (ClearBotTermsBtn != null) ClearBotTermsBtn.IsEnabled = !running && botTermRows.Count > 0;
+        foreach (var termRow in botTermRows) termRow.CanMutate = !running;
         HeaderNewButton.IsEnabled = !running;
         HeaderOpenButton.IsEnabled = !running;
         NavLibrary.IsEnabled = !running;
@@ -514,7 +515,18 @@ public partial class MainWindow:Window
         _ = Dispatcher.InvokeAsync(() =>
         {
             if (work == null && Rows.Items.Contains(row) && savedTargets.GetValueOrDefault(row.Id) != row.Target)
-                SaveEdits(commit: false);
+            {
+                if (SaveEdits(commit: false))
+                {
+                    if (ReferenceEquals(Rows.SelectedItem, row))
+                        PopulateEditorInspector(row);
+                    UpdateOverview();
+                }
+            }
+            else if (ReferenceEquals(Rows.SelectedItem, row))
+            {
+                PopulateEditorInspector(row);
+            }
         }, System.Windows.Threading.DispatcherPriority.Background);
     }
 
@@ -669,6 +681,7 @@ public partial class MainWindow:Window
     private async Task ScanCurrent(bool openEditor = false)
     {
         if (projectPath == null) return;
+        if (openEditor) routeOnProjectOpen = false;
         if (string.IsNullOrWhiteSpace(SourcePath.Text))
         {
             Status.Text = "اختر مصدراً للفحص أولاً.";

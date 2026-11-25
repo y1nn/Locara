@@ -12,9 +12,26 @@ public partial class MainWindow
 {
     private sealed record LiveSampleItem(string Section, string Source, string Target);
 
-    private sealed record BotTermRow(string Source, string Target, string Note)
+    private sealed class BotTermRow(string source, string target, string note, bool canMutate) : System.ComponentModel.INotifyPropertyChanged
     {
+        private bool canMutate = canMutate;
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+
+        public string Source { get; } = source;
+        public string Target { get; } = target;
+        public string Note { get; } = note;
         public string OriginLabel => Note == "lore-bot" ? "[بوت الكشّاف]" : "[بوت المشهد]";
+
+        public bool CanMutate
+        {
+            get => canMutate;
+            set
+            {
+                if (canMutate == value) return;
+                canMutate = value;
+                PropertyChanged?.Invoke(this, new(nameof(CanMutate)));
+            }
+        }
     }
 
     private sealed record TokenChipItem(string Token, string Label, Brush StatusBrush);
@@ -101,8 +118,12 @@ public partial class MainWindow
         }
 
         var current = Tabs.SelectedItem as TabItem;
+        bool filesCtaCoversTranslate = current == FilesPage
+            && ContinueToBotsBtn?.Visibility == Visibility.Visible
+            && nextAction is NextAction.Translate or NextAction.ResumeTeam;
         bool ownedByCurrentStage =
             (current == FilesPage && nextAction is NextAction.Scan or NextAction.Files or NextAction.Templates)
+            || filesCtaCoversTranslate
             || (current == TranslationPage && nextAction is NextAction.Translate or NextAction.ResumeTeam or NextAction.Drafts)
             || (current == EditorPage && nextAction is NextAction.Issues)
             || (current == PackagesPage && nextAction is NextAction.Deploy or NextAction.Trial);
@@ -155,7 +176,7 @@ public partial class MainWindow
         BotLoreSubPanel.Visibility = BotTabLore.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         BotSectionsSubPanel.Visibility = BotTabSections.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
 
-        if (BotTabLore.IsChecked == true && work == null)
+        if (BotTabLore.IsChecked == true)
             _ = ReloadLoreAndGlossariesAsync();
         else if (BotTabSections.IsChecked == true)
             UpdateOverview(includeSections: true);
@@ -196,24 +217,27 @@ public partial class MainWindow
             ? "تُبنى بطاقة عالم اللعبة تلقائياً عند بدء تشغيل البوتات لتوحيد النبرة وأسماء الشخصيات عبر كل المشاهد."
             : brief;
 
+        bool canMutate = work == null;
         botTermRows.Clear();
         foreach (var entry in botEntries)
-            botTermRows.Add(new BotTermRow(entry.Source, entry.Target, entry.Note));
+            botTermRows.Add(new BotTermRow(entry.Source, entry.Target, entry.Note, canMutate));
 
         BotTermsEmptyText.Visibility = botTermRows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        ClearBotTermsBtn.IsEnabled = botTermRows.Count > 0 && work == null;
+        ClearBotTermsBtn.IsEnabled = botTermRows.Count > 0 && canMutate;
         Terms.ItemsSource = manual;
 
         if (LoreBotBadge != null && work == null)
         {
             bool hasLore = !string.IsNullOrWhiteSpace(brief) || botTermRows.Count > 0;
             LoreBotBadge.Text = hasLore ? $"جاهز ({botTermRows.Count:N0} مصطلح)" : "في الانتظار";
-            LoreBotBadge.Foreground = ResBrush(hasLore ? "SuccessFg" : "TextMuted");
-            if (hasLore && LoreBotDetail != null)
+            LoreBotBadge.SetResourceReference(TextBlock.ForegroundProperty, hasLore ? "SuccessFg" : "TextMuted");
+            if (LoreBotDetail != null)
             {
-                LoreBotDetail.Text = string.IsNullOrWhiteSpace(brief)
-                    ? $"اكتشف البوت {botTermRows.Count:N0} مصطلحاً — انقر للمراجعة أو التثبيت"
-                    : brief;
+                LoreBotDetail.Text = hasLore
+                    ? (string.IsNullOrWhiteSpace(brief)
+                        ? $"اكتشف البوت {botTermRows.Count:N0} مصطلحاً — انقر للمراجعة أو التثبيت"
+                        : brief)
+                    : "يبني بطاقة عالم اللعبة ويكتشف الأسماء والمصطلحات تلقائياً";
             }
         }
     }
@@ -289,15 +313,12 @@ public partial class MainWindow
 
     private void SaveBudgetSettingsClick(object sender, RoutedEventArgs e)
     {
-        try
+        if (UnlimitedBudget.IsChecked != true)
         {
-            _ = ReadProvider(useSavedKey: true);
-        }
-        catch (ArgumentException error)
-        {
-            if (UnlimitedBudget.IsChecked != true)
+            if (!int.TryParse(CharacterBudget.Text, out int c) || c <= 0
+                || !int.TryParse(RequestBudget.Text, out int r) || r <= 0)
             {
-                Status.Text = error.Message;
+                Status.Text = "أدخل حدّاً موجباً للأحرف والطلبات أو فعّل خيار «بلا سقف».";
                 return;
             }
         }
@@ -422,11 +443,11 @@ public partial class MainWindow
             string liveValidation = Tokens.Validate(source, target, scannedEngine);
             bool allOk = liveValidation.Length == 0;
             InspectorTokenStatusText.Text = allOk ? "✓ الرموز سليمة" : liveValidation;
-            InspectorTokenStatusText.Foreground = ResBrush(allOk ? "SuccessFg" : "WarningFg");
+            InspectorTokenStatusText.SetResourceReference(TextBlock.ForegroundProperty, allOk ? "SuccessFg" : "WarningFg");
         }
 
         string effectiveWarning = Tokens.Validate(source, target, scannedEngine);
-        if (effectiveWarning.Length == 0 && !string.IsNullOrWhiteSpace(savedWarning) && savedWarning.Contains("تعارض"))
+        if (effectiveWarning.Length == 0 && !string.IsNullOrWhiteSpace(savedWarning))
             effectiveWarning = savedWarning;
 
         InspectorWarningText.Text = effectiveWarning;
@@ -437,7 +458,6 @@ public partial class MainWindow
     {
         if (updatingInspector || Rows.SelectedItem is not Unit row) return;
         row.Target = InspectorTargetBox.Text;
-        Rows.Items.Refresh();
         UpdateInspectorTokenAndLengthState(row.Source, row.Target, row.Warning);
     }
 
@@ -446,7 +466,11 @@ public partial class MainWindow
         if (work == null && Rows.SelectedItem is Unit row && savedTargets.GetValueOrDefault(row.Id) != row.Target)
         {
             if (SaveEdits(commit: false))
+            {
                 Status.Text = "حُفظ التعديل تلقائياً.";
+                PopulateEditorInspector(row);
+                UpdateOverview();
+            }
         }
     }
 

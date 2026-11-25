@@ -221,10 +221,11 @@ public partial class MainWindow
             : $"المفعّل للترجمة: {includedFiles:N0} ملف ({includedUnits:N0} نص)  ·  المستبعد: {excludedFiles:N0} ملف ({excludedUnits:N0} نص)";
 
         FilesGuardBanner.Visibility = Visibility.Visible;
+        UpdateHeaderPrimaryVisibility();
         if (includedFiles == 0 && excludedFiles > 0)
         {
             FilesGuardTitle.Text = $"استُبعدت جميع الملفات المكتشفة ({excludedFiles:N0} ملف تقني/مختلط) لحماية رصيدك";
-            FilesGuardTitle.Foreground = ResBrush("WarningFg");
+            FilesGuardTitle.SetResourceReference(TextBlock.ForegroundProperty, "WarningFg");
             FilesGuardDetail.Text = "شغّل «تحليل ذكي (AI Scout)» أو عاين العينات أدناه وفعّل النصوص البشرية فقط.";
             TranslationFilesGuardText.Text = $"تنبيه: لا توجد ملفات مفعّلة للترجمة حالياً ({excludedFiles:N0} ملف مستبعد).";
         }
@@ -244,7 +245,7 @@ public partial class MainWindow
             if (hasPotOnlyWithSiblingPo)
                 parts.Add("ملاحظة Gettext: النصوص الحالية في قالب (.pot) ومعظم الألعاب تقرأ ملف (.po) عند التثبيت");
             FilesGuardTitle.Text = $"المصدر جاهز للتعريب — {includedFiles:N0} ملف مفعّل ({includedUnits:N0} نص)";
-            FilesGuardTitle.Foreground = ResBrush(flaggedIncluded > 0 ? "WarningFg" : "AccentIndicator");
+            FilesGuardTitle.SetResourceReference(TextBlock.ForegroundProperty, flaggedIncluded > 0 ? "WarningFg" : "AccentIndicator");
             FilesGuardDetail.Text = string.Join(" · ", parts) + ".";
             var brief = new List<string> { $"الملفات المفعّلة: {includedFiles:N0}/{currentScannedFiles.Count:N0} ({includedUnits:N0} نص)" };
             if (flaggedIncluded > 0) brief.Add($"تنبيه: {flaggedIncluded:N0} ملف مختلط/تقني مفعّل");
@@ -257,7 +258,7 @@ public partial class MainWindow
         else
         {
             FilesGuardTitle.Text = $"الملفات صافية وجاهزة للتعريب ({includedFiles:N0} ملف · {includedUnits:N0} نص)";
-            FilesGuardTitle.Foreground = ResBrush("SuccessFg");
+            FilesGuardTitle.SetResourceReference(TextBlock.ForegroundProperty, "SuccessFg");
             FilesGuardDetail.Text = "لم يُكتشف أي تداخل تقني في الملفات المحددة — انتقل إلى غرفة البوتات لبدء التعريب التلقائي.";
             TranslationFilesGuardText.Text = $"الملفات المفعّلة للترجمة: {includedFiles:N0} من {currentScannedFiles.Count:N0} ({includedUnits:N0} نص).";
         }
