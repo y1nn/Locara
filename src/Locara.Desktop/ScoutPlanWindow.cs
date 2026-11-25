@@ -9,6 +9,9 @@ namespace Locara.Desktop;
 
 internal sealed class ScoutPlanWindow : Window
 {
+    private static Brush LookupBrush(string key, Color fallback) =>
+        Application.Current?.Resources[key] as Brush ?? new SolidColorBrush(fallback);
+
     private sealed class ScoutRow : INotifyPropertyChanged
     {
         private bool selected = true;
@@ -39,9 +42,9 @@ internal sealed class ScoutPlanWindow : Window
             GroupSummary = $"{cluster.DirectoryGroup} [{cluster.Format}] · {cluster.FileCount:N0} ملف ({cluster.TotalUnits:N0} نص)";
             (ActionLabel, ActionBrush) = rec.Action switch
             {
-                "include_all" => ("تضمين الكل", new SolidColorBrush(Color.FromRgb(0x14, 0x63, 0x56))),
-                "include_fields" => ("حقول محددة فقط", new SolidColorBrush(Color.FromRgb(0x1B, 0x4F, 0x72))),
-                _ => ("استبعاد", new SolidColorBrush(Color.FromRgb(0xA9, 0x32, 0x26)))
+                "include_all" => ("تضمين الكل", LookupBrush("SuccessFg", Color.FromRgb(0x28, 0xCE, 0x9B))),
+                "include_fields" => ("حقول محددة فقط", LookupBrush("InfoFg", Color.FromRgb(0x47, 0xBD, 0xF8))),
+                _ => ("استبعاد", LookupBrush("DangerFg", Color.FromRgb(0xF0, 0x6A, 0x6A)))
             };
             FieldsSummary = rec.FieldPatterns.Count == 0 ? "—" : string.Join("، ", rec.FieldPatterns);
             ConfidenceLabel = rec.Confidence switch
@@ -61,12 +64,13 @@ internal sealed class ScoutPlanWindow : Window
     internal ScoutPlanWindow(ScoutPlan plan)
     {
         Title = "خطة كشّاف الذكاء الاصطناعي (AI Localization Scout)";
-        Width = 960;
-        Height = 560;
+        Width = 980;
+        Height = 580;
         MinWidth = 680;
         MinHeight = 380;
         FlowDirection = FlowDirection.RightToLeft;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        ThemeManager.AttachWindow(this);
 
         var byId = plan.AnalyzedClusters.ToDictionary(c => c.ClusterId, StringComparer.Ordinal);
         rows = plan.Recommendations
@@ -74,21 +78,25 @@ internal sealed class ScoutPlanWindow : Window
             .Select(r => new ScoutRow(r, byId[r.ClusterId]))
             .ToList();
 
-        var layout = new DockPanel { Margin = new Thickness(18) };
+        var layout = new DockPanel { Margin = new Thickness(20, 18, 20, 18) };
 
         int totalFiles = plan.Recommendations.Where(r => byId.ContainsKey(r.ClusterId)).Sum(r => byId[r.ClusterId].FileCount);
         string tokenNote = plan.Tokens.TotalTokens > 0
             ? $" · استهلاك التحليل: {plan.Tokens.TotalTokens:N0} توكن ({plan.Provider} / {plan.Model})"
             : $" · المزوّد: {plan.Provider} / {plan.Model}";
-        var header = new TextBlock
+        var headerCard = new Border
         {
-            Text = $"راجع توصيات كشّاف الذكاء الاصطناعي لـ {rows.Count:N0} مجموعة هيكلية ({totalFiles:N0} ملف){tokenNote}\nلن تُطبّق أي قاعدة أو استبعاد إلا على الصفوف المحددة أدناه.",
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 0, 0, 10),
-            FontSize = 13
+            Style = (Style)Application.Current.FindResource("SubtleCardBorderStyle"),
+            Margin = new Thickness(0, 0, 0, 12),
+            Child = new TextBlock
+            {
+                Text = $"راجع توصيات كشّاف الذكاء الاصطناعي لـ {rows.Count:N0} مجموعة هيكلية ({totalFiles:N0} ملف){tokenNote}\nلن تُطبّق أي قاعدة أو استبعاد إلا على الصفوف المحددة أدناه.",
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 13
+            }
         };
-        DockPanel.SetDock(header, Dock.Top);
-        layout.Children.Add(header);
+        DockPanel.SetDock(headerCard, Dock.Top);
+        layout.Children.Add(headerCard);
 
         var buttons = new StackPanel
         {
@@ -99,24 +107,21 @@ internal sealed class ScoutPlanWindow : Window
         {
             Content = "تطبيق التوصيات المحددة",
             IsDefault = true,
-            Background = new SolidColorBrush(Color.FromRgb(0x17, 0x64, 0x5E)),
-            Foreground = Brushes.White,
-            Padding = new Thickness(14, 6, 14, 6),
-            Margin = new Thickness(0, 0, 8, 0),
+            Style = (Style)Application.Current.FindResource("PrimaryButtonStyle"),
             IsEnabled = rows.Count > 0
         };
         apply.Click += (_, _) => DialogResult = true;
         buttons.Children.Add(apply);
 
-        var selectAll = new Button { Content = "تحديد الكل", Padding = new Thickness(10, 6, 10, 6), Margin = new Thickness(0, 0, 8, 0) };
+        var selectAll = new Button { Content = "تحديد الكل" };
         selectAll.Click += (_, _) => { foreach (var r in rows) r.Selected = true; };
         buttons.Children.Add(selectAll);
 
-        var clearAll = new Button { Content = "إلغاء الكل", Padding = new Thickness(10, 6, 10, 6), Margin = new Thickness(0, 0, 8, 0) };
+        var clearAll = new Button { Content = "إلغاء الكل" };
         clearAll.Click += (_, _) => { foreach (var r in rows) r.Selected = false; };
         buttons.Children.Add(clearAll);
 
-        buttons.Children.Add(new Button { Content = "إلغاء", IsCancel = true, Padding = new Thickness(12, 6, 12, 6) });
+        buttons.Children.Add(new Button { Content = "إلغاء", IsCancel = true });
         DockPanel.SetDock(buttons, Dock.Bottom);
         layout.Children.Add(buttons);
 
@@ -124,12 +129,8 @@ internal sealed class ScoutPlanWindow : Window
         {
             AutoGenerateColumns = false,
             CanUserAddRows = false,
-            HeadersVisibility = DataGridHeadersVisibility.Column,
-            GridLinesVisibility = DataGridGridLinesVisibility.Horizontal,
             RowHeight = 40,
-            Background = Brushes.White,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0xD2, 0xDF, 0xDC)),
-            FontSize = 12,
+            FontSize = 12.5,
             ItemsSource = rows
         };
 
@@ -144,7 +145,7 @@ internal sealed class ScoutPlanWindow : Window
         ltrStyle.Setters.Add(new Setter(FrameworkElement.FlowDirectionProperty, FlowDirection.LeftToRight));
         ltrStyle.Setters.Add(new Setter(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center));
         ltrStyle.Setters.Add(new Setter(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis));
-        ltrStyle.Setters.Add(new Setter(TextBlock.PaddingProperty, new Thickness(6, 0, 6, 0)));
+        ltrStyle.Setters.Add(new Setter(TextBlock.PaddingProperty, new Thickness(8, 0, 8, 0)));
 
         grid.Columns.Add(new DataGridTextColumn
         {
@@ -159,13 +160,13 @@ internal sealed class ScoutPlanWindow : Window
         actionStyle.Setters.Add(new Setter(TextBlock.ForegroundProperty, new Binding(nameof(ScoutRow.ActionBrush))));
         actionStyle.Setters.Add(new Setter(TextBlock.FontWeightProperty, FontWeights.SemiBold));
         actionStyle.Setters.Add(new Setter(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center));
-        actionStyle.Setters.Add(new Setter(TextBlock.PaddingProperty, new Thickness(6, 0, 6, 0)));
+        actionStyle.Setters.Add(new Setter(TextBlock.PaddingProperty, new Thickness(8, 0, 8, 0)));
         grid.Columns.Add(new DataGridTextColumn
         {
             Header = "التوصية",
             Binding = new Binding(nameof(ScoutRow.ActionLabel)),
             IsReadOnly = true,
-            Width = 115,
+            Width = 120,
             ElementStyle = actionStyle
         });
 
@@ -183,13 +184,13 @@ internal sealed class ScoutPlanWindow : Window
             Header = "الثقة",
             Binding = new Binding(nameof(ScoutRow.ConfidenceLabel)),
             IsReadOnly = true,
-            Width = 65
+            Width = 68
         });
 
         var reasonStyle = new Style(typeof(TextBlock));
         reasonStyle.Setters.Add(new Setter(TextBlock.TextWrappingProperty, TextWrapping.Wrap));
         reasonStyle.Setters.Add(new Setter(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center));
-        reasonStyle.Setters.Add(new Setter(TextBlock.PaddingProperty, new Thickness(6, 0, 6, 0)));
+        reasonStyle.Setters.Add(new Setter(TextBlock.PaddingProperty, new Thickness(8, 0, 8, 0)));
         grid.Columns.Add(new DataGridTextColumn
         {
             Header = "السبب",

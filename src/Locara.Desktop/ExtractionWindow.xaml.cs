@@ -17,6 +17,7 @@ public partial class ExtractionWindow : Window
     public ExtractionWindow(IReadOnlyList<string> resources, Func<string, CancellationToken, ExtractionPreview> inspect)
     {
         InitializeComponent();
+        ThemeManager.AttachWindow(this);
         this.inspect = inspect;
         ResourceChoices.ItemsSource = resources;
         ResourceChoices.SelectedIndex = 0;

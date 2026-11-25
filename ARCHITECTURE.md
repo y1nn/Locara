@@ -7,9 +7,9 @@ Locara is a local-first PC-game Arabic localization workbench built on **.NET 10
 | Project | Target | Role |
 |---|---|---|
 | `src/Locara.Core` | `net10.0` | Format provider registry, engine detection, container & binary codecs, Arabic shaping/wrapping/font patching, file quality filtering & AI Scout, SQLite store, stateful AI translation bots, installer & Steam trial manager |
-| `src/Locara.Desktop` | `net10.0-windows` | Arabic RTL WPF desktop app (`MainWindow` split by feature partials) and Windows Credential Manager integration |
+| `src/Locara.Desktop` | `net10.0-windows` | Arabic RTL WPF Localization Studio (Dark/Light `ThemeManager`, 4-stage rail, live 3-Bot Studio, Split Contextual Editor, and Windows Credential Manager) |
 | `src/Locara.Cli` | `net10.0` | Headless CLI (`scan`, `aes-key`, `files`, `clusters`, `scout`, `advice`, `translate`, `build`, `export-xunity`, `install`, `restore`, etc.) |
-| `checks/Locara.Checks` | `net10.0` | xUnit test suite (`105` tests) |
+| `checks/Locara.Checks` | `net10.0` | xUnit test suite (`109` tests) |
 
 Build settings (`Directory.Build.props`, `global.json`, `.github/workflows/ci.yml`):
 - .NET SDK `10.0.404` (`rollForward: latestPatch`), `Nullable=enable`, `TreatWarningsAsErrors=true`, `RestorePackagesWithLockFile=true`.

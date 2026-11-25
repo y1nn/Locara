@@ -489,12 +489,18 @@ public partial class MainWindow
         var settings = ReadInlineTeamSettings(reviewDrafts: false);
         string prompts = string.Join("\n\n", new[] { ("المشرف", "supervisor"), ("المترجم", "translator"), ("المراجع", "reviewer") }
             .Select(role => role.Item1 + "\n" + TranslationTeam.PromptPreview(role.Item2, settings)));
-        new Window
+        var win = new Window
         {
-            Owner = this, Title = "تعليمات النظام الكاملة", Width = 720, Height = 520,
+            Owner = this, Title = "تعليمات النظام الكاملة", Width = 740, Height = 540,
             FlowDirection = FlowDirection.RightToLeft, WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new TextBox { Text = prompts, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }
-        }.ShowDialog();
+            Content = new Border
+            {
+                Margin = new Thickness(18),
+                Child = new TextBox { Text = prompts, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }
+            }
+        };
+        ThemeManager.AttachWindow(win);
+        win.ShowDialog();
     }
 
     private async void EstimateTeamBudget(object sender, RoutedEventArgs e)

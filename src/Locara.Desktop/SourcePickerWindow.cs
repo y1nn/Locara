@@ -13,20 +13,41 @@ internal sealed class SourcePickerWindow : Window
     {
         Title = title;
         Width = 780;
-        Height = 510;
-        MinWidth = 470;
-        MinHeight = 310;
+        Height = 520;
+        MinWidth = 480;
+        MinHeight = 320;
         FlowDirection = FlowDirection.RightToLeft;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        ThemeManager.AttachWindow(this);
 
-        var layout = new DockPanel { Margin = new Thickness(18) };
-        var search = new TextBox { ToolTip = "بحث" };
+        var layout = new DockPanel { Margin = new Thickness(20, 18, 20, 18) };
+
+        var headerPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
+        headerPanel.Children.Add(new TextBlock
+        {
+            Text = title,
+            FontSize = 18,
+            FontWeight = FontWeights.Bold,
+            Margin = new Thickness(0, 0, 0, 8)
+        });
+        var search = new TextBox { ToolTip = "ابحث بالاسم…" };
         System.Windows.Automation.AutomationProperties.SetName(search, "بحث");
-        DockPanel.SetDock(search, Dock.Top);
-        layout.Children.Add(search);
+        headerPanel.Children.Add(search);
+        DockPanel.SetDock(headerPanel, Dock.Top);
+        layout.Children.Add(headerPanel);
 
-        var actions = new StackPanel { Orientation = Orientation.Horizontal };
-        var confirm = new Button { Content = "اختيار المحدد", IsDefault = true, IsEnabled = false };
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 12, 0, 0)
+        };
+        var confirm = new Button
+        {
+            Content = "اختيار المحدد",
+            IsDefault = true,
+            IsEnabled = false,
+            Style = (Style)Application.Current.FindResource("PrimaryButtonStyle")
+        };
         confirm.Click += (_, _) => DialogResult = true;
         actions.Children.Add(confirm);
         actions.Children.Add(new Button { Content = "إلغاء", IsCancel = true });

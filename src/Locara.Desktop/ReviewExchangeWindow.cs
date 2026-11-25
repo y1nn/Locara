@@ -11,19 +11,38 @@ internal sealed class ReviewExchangeWindow : Window
 
     internal ReviewExchangeWindow(IReadOnlyList<ReviewChange> changes, bool notes = false)
     {
-        Title = "مراجعة تغييرات CSV";
+        Title = notes ? "ملاحظات التدقيق" : "مراجعة تغييرات CSV";
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         FlowDirection = FlowDirection.RightToLeft;
         Width = 1080;
         Height = 620;
         MinWidth = 680;
-        var layout = new DockPanel { Margin = new Thickness(16) };
+        ThemeManager.AttachWindow(this);
+
+        var layout = new DockPanel { Margin = new Thickness(20, 18, 20, 18) };
         int blocked = changes.Count(change => change.Issue.Length > 0);
-        var summary = new TextBlock { Text = notes ? $"ملاحظات الفريق — {changes.Count}" : $"تغييرات قابلة للتطبيق — {changes.Count - blocked}    تحتاج إلى مراجعة — {blocked}" };
-        DockPanel.SetDock(summary, Dock.Top);
-        layout.Children.Add(summary);
-        var rows = new DataGrid { AutoGenerateColumns = false, CanUserAddRows = false, ItemsSource = changes };
-        var apply = new Button { Content = notes ? "فتح النص في المحرّر" : "حفظ المحدد كمسودات", IsEnabled = !notes && blocked < changes.Count };
+        var summaryCard = new Border
+        {
+            Style = (Style)Application.Current.FindResource("SubtleCardBorderStyle"),
+            Margin = new Thickness(0, 0, 0, 12),
+            Child = new TextBlock
+            {
+                Text = notes
+                    ? $"ملاحظات البوت المدقق — {changes.Count:N0} سطر (اختر سطراً لفتحه في المحرّر)"
+                    : $"تغييرات قابلة للتطبيق: {changes.Count - blocked:N0}   ·   تحتاج إلى مراجعة: {blocked:N0}",
+                FontWeight = FontWeights.SemiBold
+            }
+        };
+        DockPanel.SetDock(summaryCard, Dock.Top);
+        layout.Children.Add(summaryCard);
+
+        var rows = new DataGrid { AutoGenerateColumns = false, CanUserAddRows = false, RowHeight = 40, ItemsSource = changes };
+        var apply = new Button
+        {
+            Content = notes ? "فتح السطر في المحرّر" : "حفظ المحدد كمسودات",
+            IsEnabled = !notes && blocked < changes.Count,
+            Style = (Style)Application.Current.FindResource("PrimaryButtonStyle")
+        };
         if (notes)
         {
             rows.SelectionMode = DataGridSelectionMode.Single;
@@ -37,12 +56,17 @@ internal sealed class ReviewExchangeWindow : Window
             SelectedIndex = rows.SelectedIndex;
             DialogResult = true;
         };
-        var actions = new StackPanel { Orientation = Orientation.Horizontal };
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 12, 0, 0)
+        };
         actions.Children.Add(apply);
         actions.Children.Add(new Button { Content = "إلغاء", IsCancel = true });
         DockPanel.SetDock(actions, Dock.Bottom);
         layout.Children.Add(actions);
-        if (!notes) rows.Columns.Add(new DataGridCheckBoxColumn { Header = "تطبيق", Binding = new Binding(nameof(ReviewChange.Include)) });
+
+        if (!notes) rows.Columns.Add(new DataGridCheckBoxColumn { Header = "تطبيق", Binding = new Binding(nameof(ReviewChange.Include)), Width = 62 });
         foreach (var (title, property) in new[]
         {
             ("الأصل", nameof(ReviewChange.Source)), ("المسودة الحالية", nameof(ReviewChange.Current)),
