@@ -230,18 +230,13 @@ public static class LocalizationScout
     {
         if (string.IsNullOrWhiteSpace(raw))
             throw new InvalidDataException("رد فارغ من كشّاف الذكاء الاصطناعي.");
-        string trimmed = raw.Trim();
-        if (trimmed.StartsWith("```", StringComparison.Ordinal))
-        {
-            int firstNewline = trimmed.IndexOf('\n');
-            int lastFence = trimmed.LastIndexOf("```", StringComparison.Ordinal);
-            if (firstNewline >= 0 && lastFence > firstNewline)
-                trimmed = trimmed[(firstNewline + 1)..lastFence].Trim();
-        }
-        int start = trimmed.IndexOf('{');
-        int end = trimmed.LastIndexOf('}');
+        string cleaned = ApiProvider.CleanJsonPayload(raw);
+        if (cleaned.Length >= 2 && cleaned[0] == '{' && cleaned[^1] == '}')
+            return cleaned;
+        int start = cleaned.IndexOf('{');
+        int end = cleaned.LastIndexOf('}');
         if (start < 0 || end <= start)
             throw new InvalidDataException("تعذّر استخراج كائن JSON صالح من رد كشّاف الذكاء الاصطناعي.");
-        return trimmed[start..(end + 1)];
+        return cleaned[start..(end + 1)];
     }
 }

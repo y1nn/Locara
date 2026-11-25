@@ -868,6 +868,31 @@ public sealed class ProjectService(ProjectStore store)
         return new(seen.Count, count, diagnostics, input.Package);
     }
 
+    public (bool HasActivePot, List<string> SiblingPoPaths) GetGettextPoStatus()
+    {
+        var poFiles = store.Query(
+            "SELECT path FROM files WHERE active=1 AND format='po' ORDER BY path",
+            r => r.GetString(0));
+        if (poFiles.Count == 0) return (false, []);
+
+        bool hasActivePot = false;
+        foreach (string filePath in poFiles)
+        {
+            if (!IsGettextTemplate(filePath)) continue;
+            bool hasActiveUnits = store.Query(
+                "SELECT EXISTS(SELECT 1 FROM units WHERE path=$p AND active=1)",
+                r => r.GetBoolean(0),
+                ("$p", filePath)).Single();
+            if (hasActiveUnits) { hasActivePot = true; break; }
+        }
+        if (!hasActivePot) return (false, []);
+        var siblings = poFiles
+            .Where(p => !IsGettextTemplate(p))
+            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return (true, siblings);
+    }
+
     public IReadOnlyList<FileQualitySummary> ScannedFiles()
     {
         var files = store.Query("SELECT path, format FROM files WHERE active=1 ORDER BY path",

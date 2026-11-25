@@ -28,7 +28,7 @@ jobs:
           if ($trackedLocal) {
             throw "Tracked files found under .local/: $trackedLocal"
           }
-          $leaks = git grep -n -I -E "(C:\\\\Users|E:\\\\test|E:\\\\projects|/Users/|/home/|sk-[A-Za-z0-9]{16,}|ghp_[A-Za-z0-9]{16,}|nfp_[A-Za-z0-9]{16,})" -- ':!.github/workflows/ci.yml'
+          $leaks = git grep -n -I -E "(C:[/\\\\]Users|E:[/\\\\]test|E:[/\\\\]projects|D:[/\\\\]|/Users/|/home/|sk-ant-[A-Za-z0-9_-]{16,}|sk-[A-Za-z0-9]{16,}|AIza[0-9A-Za-z_-]{20,}|ghp_[A-Za-z0-9]{16,}|nfp_[A-Za-z0-9]{16,})" -- ':!.github/workflows/ci.yml'
           if ($LASTEXITCODE -eq 0 -and $leaks) {
             Write-Error "Potential local path or secret leak detected:`n$leaks"
             exit 1

@@ -8,9 +8,11 @@ namespace Locara.Desktop;
 public partial class MainWindow
 {
     private bool updatingGettextTarget;
+    private int directInstallRefreshRequest;
 
-    private void RefreshDirectInstallStatus()
+    private async void RefreshDirectInstallStatus()
     {
+        int request = ++directInstallRefreshRequest;
         if (projectPath == null)
         {
             DirectInstallStatusTitle.Text = "الحالة: لا يوجد مشروع مفتوح";
@@ -21,7 +23,7 @@ public partial class MainWindow
             return;
         }
         string path = projectPath;
-        _ = Task.Run(() =>
+        var result = await Task.Run(() =>
         {
             try
             {
@@ -30,11 +32,7 @@ public partial class MainWindow
                 try { destination = PackageInstaller.ResolveInstallDestination(project); } catch { }
                 var state = PackageInstaller.GetInPlaceStatus(project);
                 string engine = project.Get("scanned_engine");
-                var scannedFiles = new ProjectService(project).ScannedFiles();
-                bool hasActivePot = scannedFiles.Any(f => f.Included && f.Format == "po" && ProjectService.IsGettextTemplate(f.Path));
-                var siblingPos = hasActivePot
-                    ? scannedFiles.Where(f => f.Format == "po" && !ProjectService.IsGettextTemplate(f.Path)).Select(f => f.Path).ToList()
-                    : new List<string>();
+                var (hasActivePot, siblingPos) = new ProjectService(project).GetGettextPoStatus();
                 string savedPoTarget = project.Get(ProjectService.GettextPoTargetSetting);
                 return (Destination: destination, State: state, Engine: engine, HasActivePot: hasActivePot, SiblingPos: siblingPos, SavedPoTarget: savedPoTarget, Error: (string?)null);
             }
@@ -42,70 +40,66 @@ public partial class MainWindow
             {
                 return (Destination: "", State: (InPlaceInstallState?)null, Engine: "", HasActivePot: false, SiblingPos: new List<string>(), SavedPoTarget: "", Error: (string?)error.Message);
             }
-        }).ContinueWith(task =>
-        {
-            Dispatcher.Invoke(() =>
-            {
-                if (projectPath != path) return;
-                var (destination, state, engine, hasActivePot, siblingPos, savedPoTarget, error) = task.Result;
-                bool showUnityTmp = string.IsNullOrWhiteSpace(engine) || engine.Equals("unity", StringComparison.OrdinalIgnoreCase);
-                UnityTmpSettingsBorder.Visibility = showUnityTmp ? Visibility.Visible : Visibility.Collapsed;
-                PopulateGettextPoTargetSelector(hasActivePot, siblingPos, savedPoTarget);
-                if (error != null)
-                {
-                    DirectInstallStatusBorder.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFF8EB"));
-                    DirectInstallStatusBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#E9C46A"));
-                    DirectInstallStatusTitle.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#8A5A00"));
-                    DirectInstallStatusTitle.Text = "تعذّر فحص حالة التثبيت";
-                    DirectInstallStatusDetail.Text = error;
-                    DirectRestoreButton.Visibility = Visibility.Collapsed;
-                    AcceptGameUpdateButton.Visibility = Visibility.Collapsed;
-                    return;
-                }
+        });
 
-                if (state == null)
-                {
-                    DirectInstallStatusBorder.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F4F8F7"));
-                    DirectInstallStatusBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D5E3DF"));
-                    DirectInstallStatusTitle.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#174B45"));
-                    DirectInstallStatusTitle.Text = "الحالة: اللعبة على ملفاتها الأصلية";
-                    string engineLabel = string.IsNullOrWhiteSpace(engine) ? "" : $" · المحرك: {engine}";
-                    DirectInstallStatusDetail.Text = string.IsNullOrWhiteSpace(destination)
-                        ? "اختر مجلد اللعبة المصدر أولاً ليتم التعرّف على مسار التثبيت تلقائياً."
-                        : $"المسار المكتشف تلقائياً: {destination}{engineLabel}";
-                    DirectInstallButton.Content = "تثبيت دائم داخل اللعبة (مع نسخة احتياطية)";
-                    DirectRestoreButton.Visibility = Visibility.Collapsed;
-                    AcceptGameUpdateButton.Visibility = Visibility.Collapsed;
-                }
-                else if (state.ModifiedExternally)
-                {
-                    DirectInstallStatusBorder.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFF6E8"));
-                    DirectInstallStatusBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#E9B949"));
-                    DirectInstallStatusTitle.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#8A5A00"));
-                    DirectInstallStatusTitle.Text = $"تنبيه: تغيّرت {state.ModifiedCount} ملفات داخل اللعبة خارجياً (تحديث رسمي للعبة)";
-                    DirectInstallStatusDetail.Text =
-                        $"المسار: {state.Destination}\n" +
-                        "اضغط «اعتماد تحديث اللعبة الجديد» ثم أعد فحص الملفات لمزامنة التحديث الجديد، وبعدها ثبّت الترجمة من جديد.";
-                    DirectInstallButton.Content = "تثبيت دائم داخل اللعبة (مع نسخة احتياطية)";
-                    DirectRestoreButton.Visibility = Visibility.Collapsed;
-                    AcceptGameUpdateButton.Visibility = Visibility.Visible;
-                }
-                else
-                {
-                    DirectInstallStatusBorder.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#EBF8F4"));
-                    DirectInstallStatusBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#8CCBB9"));
-                    DirectInstallStatusTitle.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#0F5B4F"));
-                    DirectInstallStatusTitle.Text = $"الحالة: التعريب مثبّت دائماً داخل اللعبة ({state.Files} ملفات)";
-                    string summaryLine = string.IsNullOrWhiteSpace(state.Summary) ? "" : $"\n{state.Summary}";
-                    string localTime = state.InstalledAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
-                    DirectInstallStatusDetail.Text =
-                        $"تاريخ التثبيت: {localTime} · النسخة الاحتياطية الأصلية محفوظة بأمان داخل المشروع.\nالمسار: {state.Destination}{summaryLine}";
-                    DirectInstallButton.Content = "تحديث التثبيت الدائم (بأحدث ترجمة / خط)";
-                    DirectRestoreButton.Visibility = Visibility.Visible;
-                    AcceptGameUpdateButton.Visibility = Visibility.Collapsed;
-                }
-            });
-        }, TaskScheduler.Default);
+        if (!IsLoaded || request != directInstallRefreshRequest || projectPath != path) return;
+        var (destination, state, engine, hasActivePot, siblingPos, savedPoTarget, error) = result;
+        bool showUnityTmp = string.IsNullOrWhiteSpace(engine) || engine.Equals("unity", StringComparison.OrdinalIgnoreCase);
+        UnityTmpSettingsBorder.Visibility = showUnityTmp ? Visibility.Visible : Visibility.Collapsed;
+        PopulateGettextPoTargetSelector(hasActivePot, siblingPos, savedPoTarget);
+        if (error != null)
+        {
+            DirectInstallStatusBorder.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFF8EB"));
+            DirectInstallStatusBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#E9C46A"));
+            DirectInstallStatusTitle.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#8A5A00"));
+            DirectInstallStatusTitle.Text = "تعذّر فحص حالة التثبيت";
+            DirectInstallStatusDetail.Text = error;
+            DirectRestoreButton.Visibility = Visibility.Collapsed;
+            AcceptGameUpdateButton.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (state == null)
+        {
+            DirectInstallStatusBorder.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F4F8F7"));
+            DirectInstallStatusBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D5E3DF"));
+            DirectInstallStatusTitle.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#174B45"));
+            DirectInstallStatusTitle.Text = "الحالة: اللعبة على ملفاتها الأصلية";
+            string engineLabel = string.IsNullOrWhiteSpace(engine) ? "" : $" · المحرك: {engine}";
+            DirectInstallStatusDetail.Text = string.IsNullOrWhiteSpace(destination)
+                ? "اختر مجلد اللعبة المصدر أولاً ليتم التعرّف على مسار التثبيت تلقائياً."
+                : $"المسار المكتشف تلقائياً: {destination}{engineLabel}";
+            DirectInstallButton.Content = "تثبيت دائم داخل اللعبة (مع نسخة احتياطية)";
+            DirectRestoreButton.Visibility = Visibility.Collapsed;
+            AcceptGameUpdateButton.Visibility = Visibility.Collapsed;
+        }
+        else if (state.ModifiedExternally)
+        {
+            DirectInstallStatusBorder.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFF6E8"));
+            DirectInstallStatusBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#E9B949"));
+            DirectInstallStatusTitle.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#8A5A00"));
+            DirectInstallStatusTitle.Text = $"تنبيه: تغيّرت {state.ModifiedCount} ملفات داخل اللعبة خارجياً (تحديث رسمي للعبة)";
+            DirectInstallStatusDetail.Text =
+                $"المسار: {state.Destination}\n" +
+                "اضغط «اعتماد تحديث اللعبة الجديد» ثم أعد فحص الملفات لمزامنة التحديث الجديد، وبعدها ثبّت الترجمة من جديد.";
+            DirectInstallButton.Content = "تثبيت دائم داخل اللعبة (مع نسخة احتياطية)";
+            DirectRestoreButton.Visibility = Visibility.Collapsed;
+            AcceptGameUpdateButton.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            DirectInstallStatusBorder.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#EBF8F4"));
+            DirectInstallStatusBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#8CCBB9"));
+            DirectInstallStatusTitle.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#0F5B4F"));
+            DirectInstallStatusTitle.Text = $"الحالة: التعريب مثبّت دائماً داخل اللعبة ({state.Files} ملفات)";
+            string summaryLine = string.IsNullOrWhiteSpace(state.Summary) ? "" : $"\n{state.Summary}";
+            string localTime = state.InstalledAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+            DirectInstallStatusDetail.Text =
+                $"تاريخ التثبيت: {localTime} · النسخة الاحتياطية الأصلية محفوظة بأمان داخل المشروع.\nالمسار: {state.Destination}{summaryLine}";
+            DirectInstallButton.Content = "تحديث التثبيت الدائم (بأحدث ترجمة / خط)";
+            DirectRestoreButton.Visibility = Visibility.Visible;
+            AcceptGameUpdateButton.Visibility = Visibility.Collapsed;
+        }
     }
 
     private void PopulateGettextPoTargetSelector(bool hasActivePot, List<string> siblingPos, string savedTarget)
@@ -180,11 +174,21 @@ public partial class MainWindow
     {
         if (projectPath == null) return true;
         string path = projectPath;
-        var state = await Task.Run(() =>
+        InPlaceInstallState? state;
+        try
         {
-            using var project = new ProjectStore(path);
-            return PackageInstaller.GetInPlaceStatus(project);
-        });
+            state = await Task.Run(() =>
+            {
+                using var project = new ProjectStore(path);
+                return PackageInstaller.GetInPlaceStatus(project);
+            });
+        }
+        catch (Exception error)
+        {
+            if (IsLoaded && projectPath == path) Status.Text = error.Message;
+            return false;
+        }
+        if (!IsLoaded || projectPath != path) return false;
         if (state == null) return true;
         if (state.ModifiedExternally)
         {
@@ -213,29 +217,51 @@ public partial class MainWindow
             BuildLog.Text = $"استُعيدت الملفات الأصلية ({restored} ملفات) تمهيداً لـ {actionLabel}.";
             RefreshDirectInstallStatus();
         });
-        return await Task.Run(() =>
+        try
         {
-            using var project = new ProjectStore(path);
-            return PackageInstaller.GetInPlaceStatus(project) == null;
-        });
+            return await Task.Run(() =>
+            {
+                using var project = new ProjectStore(path);
+                return PackageInstaller.GetInPlaceStatus(project) == null;
+            });
+        }
+        catch (Exception error)
+        {
+            if (IsLoaded && projectPath == path) Status.Text = error.Message;
+            return false;
+        }
     }
 
     private async void DirectInstallGame(object sender, RoutedEventArgs e)
     {
-        if (projectPath == null || !SaveEdits()) return;
+        if (projectPath == null || work != null || !SaveEdits()) return;
         string path = projectPath, password = ZipPassword.Password;
 
-        var precheck = await Task.Run(() =>
+        (string Destination, string? Running, InPlaceInstallState? Existing, string Engine, string FontName, UnityArabicDisplayOptions UnityDisplay) precheck;
+        try
         {
-            using var project = new ProjectStore(path);
-            string destination = PackageInstaller.ResolveInstallDestination(project);
-            string? running = PackageInstaller.FindRunningExecutableIn(destination);
-            var existing = PackageInstaller.GetInPlaceStatus(project);
-            string engine = project.Get("scanned_engine");
-            var font = ArabicFontCatalog.Resolve(project.Get("display_font"), CustomFontsDir);
-            var unityDisplay = UnityArabicDisplayOptions.Parse(project.Get("unity_arabic_wrap"), project.Get("unity_arabic_font_scale"), project.Get("unity_arabic_shaping"), project.Get("unity_arabic_contrast"));
-            return (Destination: destination, Running: running, Existing: existing, Engine: engine, FontName: font.DisplayName, UnityDisplay: unityDisplay);
-        });
+            precheck = await Task.Run(() =>
+            {
+                using var project = new ProjectStore(path);
+                string destination = PackageInstaller.ResolveInstallDestination(project);
+                string? running = PackageInstaller.FindRunningExecutableIn(destination);
+                var existing = PackageInstaller.GetInPlaceStatus(project);
+                string engine = project.Get("scanned_engine");
+                var font = ArabicFontCatalog.Resolve(project.Get("display_font"), CustomFontsDir);
+                var unityDisplay = UnityArabicDisplayOptions.Parse(project.Get("unity_arabic_wrap"), project.Get("unity_arabic_font_scale"), project.Get("unity_arabic_shaping"), project.Get("unity_arabic_contrast"));
+                return (Destination: destination, Running: running, Existing: existing, Engine: engine, FontName: font.DisplayName, UnityDisplay: unityDisplay);
+            });
+        }
+        catch (Exception error)
+        {
+            if (IsLoaded && projectPath == path)
+            {
+                Status.Text = error.Message;
+                MessageBox.Show(this, error.Message, "Locara", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            return;
+        }
+        if (!IsLoaded || projectPath != path || work != null) return;
 
         if (precheck.Running != null)
         {

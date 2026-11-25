@@ -239,7 +239,7 @@ public partial class MainWindow:Window
             Rows.CommitEdit();
         }
         var edits = new List<(Unit Unit, bool Approve)>();
-        foreach (Unit row in Rows.Items)
+        foreach (Unit row in Rows.Items.OfType<Unit>())
         {
             bool approveRow = (row == selected && approve) || (approveUnits?.Contains(row) == true)
                 || (approvePage && row.Status != "conflict"
@@ -267,7 +267,7 @@ public partial class MainWindow:Window
                 if (MessageBox.Show(this, error.Message + "\nهل تريد إسقاط مسودة هذا السطر بعد نسخ ما تحتاجه؟",
                     "السطر لم يعد متاحاً", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
                 {
-                    var rows = Rows.Items.Cast<Unit>().Where(row => row != draft).ToList();
+                    var rows = Rows.Items.OfType<Unit>().Where(row => row != draft).ToList();
                     Rows.ItemsSource = rows;
                     savedTargets.Remove(draft.Id);
                 }
@@ -279,7 +279,7 @@ public partial class MainWindow:Window
             {
                 savedTargets[current.Id] = current.Target;
                 if (choice == MessageBoxResult.Yes) current.Target = draft.Target;
-                Rows.ItemsSource = Rows.Items.Cast<Unit>().Select(row => row == draft ? current : row).ToList();
+                Rows.ItemsSource = Rows.Items.OfType<Unit>().Select(row => row == draft ? current : row).ToList();
                 Rows.SelectedItem = current;
             }
         }
@@ -463,7 +463,7 @@ public partial class MainWindow:Window
         var dialog = new OpenFolderDialog();
         if (dialog.ShowDialog(this) == true && await ChangeSource(dialog.FolderName)) await LoadPackages();
     }
-    private async void ChooseFile(object sender,RoutedEventArgs e){var d=new OpenFileDialog{Filter="Resources|*.json;*.csv;*.tsv;*.ini;*.xml;*.yaml;*.yml;*.po;*.pot;*.xlsx;*.xlf;*.xliff;*.rpy;*.rpym;*.bundle;*.zip;*.pck|All files|*.*"};if(d.ShowDialog()==true)await ChangeSource(d.FileName);}
+    private async void ChooseFile(object sender,RoutedEventArgs e){var d=new OpenFileDialog{Filter="Resources|*.json;*.csv;*.tsv;*.ini;*.cfg;*.xml;*.yaml;*.yml;*.toml;*.strings;*.lua;*.po;*.pot;*.xlsx;*.xlf;*.xliff;*.rpy;*.rpym;*.bundle;*.locres;*.uasset;*.pak;*.translation;*.zip;*.pck;*.txt|All files|*.*"};if(d.ShowDialog()==true)await ChangeSource(d.FileName);}
     private async Task<bool> ChangeSource(string source)
     {
         if (projectPath is not { } path) { Status.Text = "أنشئ مشروعاً أولاً."; return false; }

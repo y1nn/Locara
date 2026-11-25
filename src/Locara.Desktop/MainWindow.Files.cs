@@ -107,6 +107,7 @@ public partial class MainWindow
 
     private int filesRefreshRequest;
     private bool updatingFileSelection;
+    private bool updatingFiles;
     private List<ScannedFileRow> currentScannedFiles = [];
 
     private void FilterScannedFilesChanged(object sender, RoutedEventArgs e)
@@ -293,9 +294,10 @@ public partial class MainWindow
 
     private async void IncludeHumanOnlySelectedFile(object sender, RoutedEventArgs e)
     {
-        if (projectPath == null || work != null || ScannedFilesGrid.SelectedItem is not ScannedFileRow row) return;
+        if (projectPath == null || work != null || updatingFiles || ScannedFilesGrid.SelectedItem is not ScannedFileRow row) return;
         string path = projectPath;
         string pwd = ZipPassword.Password;
+        updatingFiles = true;
         try
         {
             await Task.Run(() =>
@@ -303,6 +305,7 @@ public partial class MainWindow
                 using var store = new ProjectStore(path);
                 new ProjectService(store).SetFileIncluded(row.Path, included: true, humanOnly: true, pwd);
             });
+            if (!IsLoaded || projectPath != path) return;
             Status.Text = $"تم تفعيل النصوص البشرية فقط في «{row.Path}» وحماية القيم التقنية من التعديل.";
             RefreshScannedFiles();
             await RefreshRows();
@@ -310,13 +313,14 @@ public partial class MainWindow
         }
         catch (Exception error)
         {
-            Status.Text = error.Message;
+            if (IsLoaded && projectPath == path) Status.Text = error.Message;
         }
+        finally { updatingFiles = false; }
     }
 
     private async void ToggleScannedFile(object sender, RoutedEventArgs e)
     {
-        if (updatingFileSelection || projectPath == null || work != null) return;
+        if (updatingFileSelection || updatingFiles || projectPath == null || work != null) return;
         if (sender is not CheckBox cb || cb.DataContext is not ScannedFileRow row) return;
         bool included = cb.IsChecked == true;
         row.Included = included;
@@ -326,6 +330,7 @@ public partial class MainWindow
         bool wasLazyZero = included && row.TotalUnits == 0;
         string path = projectPath;
         string pwd = ZipPassword.Password;
+        updatingFiles = true;
         try
         {
             await Task.Run(() =>
@@ -333,6 +338,7 @@ public partial class MainWindow
                 using var store = new ProjectStore(path);
                 new ProjectService(store).SetFileIncluded(row.Path, included, humanOnly: false, pwd);
             });
+            if (!IsLoaded || projectPath != path) return;
             if (wasLazyZero) RefreshScannedFiles();
             else
             {
@@ -348,9 +354,13 @@ public partial class MainWindow
         catch (Exception error)
         {
             row.Included = !included;
-            Status.Text = error.Message;
-            RefreshScannedFiles();
+            if (IsLoaded && projectPath == path)
+            {
+                Status.Text = error.Message;
+                RefreshScannedFiles();
+            }
         }
+        finally { updatingFiles = false; }
     }
 
     private async void SelectAllScannedFiles(object sender, RoutedEventArgs e) =>
@@ -365,7 +375,7 @@ public partial class MainWindow
 
     private async Task ApplyBulkFileSelection(Func<ScannedFileRow, bool> predicate, string message)
     {
-        if (projectPath == null || work != null || currentScannedFiles.Count == 0) return;
+        if (projectPath == null || work != null || updatingFiles || currentScannedFiles.Count == 0) return;
         string path = projectPath;
         var map = new Dictionary<string, bool>(StringComparer.Ordinal);
         foreach (var row in currentScannedFiles)
@@ -379,6 +389,7 @@ public partial class MainWindow
 
         bool anyLazyIncluded = currentScannedFiles.Any(r => r.Included && r.TotalUnits == 0);
         string pwd = ZipPassword.Password;
+        updatingFiles = true;
         try
         {
             await Task.Run(() =>
@@ -386,6 +397,7 @@ public partial class MainWindow
                 using var store = new ProjectStore(path);
                 new ProjectService(store).SetFilesIncluded(map, pwd);
             });
+            if (!IsLoaded || projectPath != path) return;
             if (anyLazyIncluded) RefreshScannedFiles();
             else
             {
@@ -398,9 +410,13 @@ public partial class MainWindow
         }
         catch (Exception error)
         {
-            Status.Text = error.Message;
-            RefreshScannedFiles();
+            if (IsLoaded && projectPath == path)
+            {
+                Status.Text = error.Message;
+                RefreshScannedFiles();
+            }
         }
+        finally { updatingFiles = false; }
     }
 
     private async void RunAiScout(object sender, RoutedEventArgs e)

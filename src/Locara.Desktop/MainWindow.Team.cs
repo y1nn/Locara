@@ -588,7 +588,9 @@ public partial class MainWindow
             overrideWorkers: settings.Workers, overrideFastMode: settings.FastMode, overrideSettings: settings);
     }
 
-    private async void ResumeTeamQuick(object sender, RoutedEventArgs e)
+    private async void ResumeTeamQuick(object sender, RoutedEventArgs e) => await ResumeTeamQuickCore();
+
+    private async Task ResumeTeamQuickCore()
     {
         if (projectPath is not { } path || work != null || !SaveEdits()) return;
         ProviderOptions options;
@@ -616,7 +618,7 @@ public partial class MainWindow
     }
 
     private async void StartTeam(object sender, RoutedEventArgs e) => await StartUnifiedTranslationCore();
-    private async void ResumeTeam(object sender, RoutedEventArgs e) => ResumeTeamQuick(sender, e);
+    private async void ResumeTeam(object sender, RoutedEventArgs e) => await ResumeTeamQuickCore();
 
     private void PrepareLiveAgentsGrid(TeamPlan plan, ProviderOptions options, IReadOnlyDictionary<string, ProviderOptions> profiles,
         TeamSettings activeSettings, int workers, bool fastMode)
@@ -709,6 +711,7 @@ public partial class MainWindow
             UpdateLiveTelemetry(value, workers, clock.Elapsed, initialSaved, initialCompleted);
         });
 
+        bool finishedNormally = false;
         await Run(async cancellation =>
         {
             var result = await Task.Run(async () =>
@@ -734,6 +737,7 @@ public partial class MainWindow
                 return (status, output, notes: team.Notes(plan).Count);
             }, cancellation);
 
+            finishedNormally = true;
             LiveMonitorTitle.Text = result.status.Completed >= result.status.Total
                 ? "اكتمل التشغيل بنجاح"
                 : "توقّف التشغيل مع حفظ جميع الدفعات المكتملة";
@@ -750,6 +754,17 @@ public partial class MainWindow
                 BuildLog.Text = "معاينة الفريق جاهزة\n" + result.output;
             }
         }, keepTranslationInteractive: true);
+
+        if (!finishedNormally && IsLoaded && projectPath == path)
+        {
+            LiveMonitorTitle.Text = "توقّف التشغيل مع حفظ جميع الدفعات المكتملة";
+            LiveActiveAgentsText.Text = $"0 / {workers}";
+            foreach (var agent in liveAgents)
+            {
+                if (agent.Stage is not ("انتهى" or "مكتمل"))
+                    agent.Stage = "متوقف";
+            }
+        }
     }
 
     private void UpdateLiveTelemetry(TeamProgress value, int workers, TimeSpan elapsed, int initialSaved, int initialCompleted)
