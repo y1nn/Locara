@@ -33,7 +33,12 @@ jobs:
             Write-Error "Potential local path or secret leak detected:`n$leaks"
             exit 1
           }
+          if ($LASTEXITCODE -gt 1) {
+            throw "git grep failed with exit code $LASTEXITCODE"
+          }
           Write-Host "Privacy guard passed: 0 leaks in tracked files."
+          $global:LASTEXITCODE = 0
+          exit 0
 
       - name: Setup .NET 10 SDK
         uses: actions/setup-dotnet@v4
