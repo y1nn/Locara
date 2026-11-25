@@ -837,7 +837,7 @@
       </StackPanel>
      </Border>
 
-     <Expander Grid.Row="1" Header="خيارات متقدمة (الحزم وضبط الاستخراج والمحرّك)">
+     <Expander x:Name="SourceAdvancedExpander" Grid.Row="1" Header="خيارات متقدمة (الحزم وضبط الاستخراج ومفتاح AES والمحرّك)">
       <StackPanel Margin="4">
        <WrapPanel>
         <TextBlock Text="المحرك" VerticalAlignment="Center"/>
@@ -852,7 +852,9 @@
          <ComboBoxItem Content="gamemaker"/>
         </ComboBox>
         <TextBlock Text="كلمة مرور ZIP" VerticalAlignment="Center"/>
-        <PasswordBox x:Name="ZipPassword" Width="200"/>
+        <PasswordBox x:Name="ZipPassword" Width="160"/>
+        <TextBlock Text="مفتاح Unreal AES" VerticalAlignment="Center" ToolTip="اختياري لحزم Unreal المشفّرة (64 حرف Hex بصيغة 0x... أو Base64)"/>
+        <TextBox x:Name="UnrealAesKey" Width="210" FlowDirection="LeftToRight" FontFamily="Consolas" ToolTip="اختياري: ألصق مفتاح AES-256 (0x... أو Base64) لحزم Unreal المشفّرة ثم اضغط فحص الملفات"/>
         <Button Content="إعداد الاستخراج" Click="ConfigureExtraction"/>
         <Button Content="قدرات المصدر" Click="ShowCapabilities"/>
        </WrapPanel>

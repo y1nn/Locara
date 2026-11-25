@@ -7,7 +7,7 @@ Concise engineering reference for maintaining and extending **Locara** (post-`v1
 ## 1. Build, Test, CI & Publish Commands
 
 - **SDK:** `.NET 10.0.404` pinned in [global.json](../global.json) (`TreatWarningsAsErrors=true`, `RestorePackagesWithLockFile=true`).
-- **Build & Test (`75` xUnit tests):**
+- **Build & Test (`90` xUnit tests):**
   ```powershell
   dotnet build -c Release -p:RestoreLockedMode=true
   dotnet test -c Release --no-build
@@ -26,11 +26,12 @@ Concise engineering reference for maintaining and extending **Locara** (post-`v1
 | File | Responsibility |
 |---|---|
 | `Models.cs` | Core records, `Identity.SafePath`, `Identity.RequireNoLinks`, `ExtractionRule.FieldPatterns`, `LocaraPaths.UserDataDirectory` (`Locara` with `Locara2` fallback) |
-| `ProjectStore.cs` | SQLite WAL store (Schema v5: `settings`, `sources`, `files`, `units`, `glossary`, `attempts`, `team_runs`, `team_batches`, `team_notes`, `usage_ledger`) |
-| `ProjectService.cs` | Source/package resolution (`FindMainGodotPck`), lazy-skip secondary locale scanning & on-demand extraction, Layer 1 file/language filtering (`ExtractPathLocale`), schema cluster & AI Scout application, Gettext `.pot -> .po` delivery, loose Unity TTF patching, streaming builds, `ExportXUnityAutoTranslator` |
+| `ProjectStore.cs` / `ProjectSettings.cs` | SQLite WAL store (Schema v5) + strongly-typed `ProjectSettings` accessor (`UnrealAesKey`, `GettextPoTarget`, `UnityDisplayOptions`, scan state & file selections) |
+| `LocalizationProviders.cs` / `LocaleClassifier.cs` | Unified `ILocalizationProvider` registry (`FormatMetadata`, content probing, streamed disk extraction) and BCP-47 / localization-directory `LocaleClassifier` |
+| `ProjectService.cs` / `ProjectService.Scan.cs` / `ProjectService.Build.cs` | Modularized source/package discovery, two-pass scan with secondary-locale & auxiliary lazy-skip, file catalog & AI Scout application, Gettext `.pot -> .po` delivery, Unity TMP/font patching, and verified builds |
 | `Engines.cs` | Engine detection (`godot`, `rpgmaker`, `renpy`, `unity`, `unreal`, `gamemaker`, `generic`), `IsEngineInternalMetadata`, RPG Maker event command extraction |
 | `Containers.cs` | `FolderContainer`, `ZipContainer` (AES-256), `PckContainer` (Godot `PCK v2` & `PCK v3`, up to 16 GiB) |
-| `Formats.cs` / `CatalogFormats.cs` / `StructuredTextFormats.cs` | Format registry + `JSON`, `CSV`/`TSV`, `XML`/`XLIFF`, `INI`, `YAML`, `TOML`, `.strings` (UTF-8/UTF-16 + comment context), `Lua` (lexer-safe table extractor), `PO`/`POT`, `XLSX`, `Ren’Py`, `StarTruckerCatalog` |
+| `Formats.cs` / `CatalogFormats.cs` / `StructuredTextFormats.cs` | `JSON`/`JSONC`, `CSV`/`TSV`, `XML`/`XLIFF`, repeated-key `INI`, `YAML`, `TOML`, `.strings`, `Lua`, `LocalizationTextFormat` (`loc-txt`), `PO`/`POT`, `XLSX`, `Ren’Py`, `StarTruckerCatalog` |
 | `FieldSemantics.cs` | Key semantic classifier (`LikelyHumanText` vs `LikelyTechnical`) & locator pattern normalizer (`/*/items/*/description`) |
 | `SchemaClusterer.cs` | Groups structurally identical files into `FileSchemaCluster` templates for rule reuse & AI Scout |
 | `TextQualityClassifier.cs` | Layer 1 value + key classifier (`Translatable`, `Mixed`, `AuxiliaryData`, `SecondaryLanguage`, `Technical`) and `HumanOnlyFilter` |
@@ -40,11 +41,11 @@ Concise engineering reference for maintaining and extending **Locara** (post-`v1
 | `UnityBundleFormat.cs` | `Lz4Block`, `UnityFsBundle` (128 KiB block invariant), `UnityBundleFormat`, `UnityAddressablesCatalog` (`catalog.bin`/`catalog.json` CRC sync) |
 | `UnityAssetsFormat.cs` | Universal Unity `TextAsset` (`classId=49`) extractor/rewriter (`resources.assets`, `sharedassets*.assets`, `data.unity3d`) |
 | `XUnityAutoTranslator.cs` | `XUnityTranslationFormat` (`.txt` read/write) + `XUnityAutoTranslatorExporter` (`BepInEx/` overlay) |
-| `StarTruckerDisplay.cs` | Native Windows `icu.dll` Arabic shaping & UAX #9 BiDi, DP tag-safe `WrapArabicParagraph` (atomic `<nobr>`/`<link>`/`<a>` spans) |
+| `ArabicTextEngine.cs` / `StarTruckerDisplay.cs` | Engine-agnostic `ArabicTextEngine` facade + native Windows `icu.dll` Arabic shaping, UAX #9 BiDi, and DP tag-safe `WrapArabicParagraph` (atomic `<nobr>`/`<link>`/`<a>` & BBCode `[tag]...[/tag]` spans) |
 | `ArabicFontCatalog.cs` | Bundled OFL 1.1 Arabic fonts, Windows system fonts, custom `.ttf`/`.otf` import, `ResolveBilingual` / `ResolveForUnreal` / `ResolveContrastVariant`, OFL license writer |
 | `UnrealLocresFormat.cs` | Pure-C# UE4/UE5 `.locres` v0–v3 reader/writer (UTF-16LE for Arabic) |
 | `UnrealStringTableFormat.cs` | Pure-C# UE4/UE5 `UStringTable` `.uasset` (standalone and split `.uasset` + `.uexp` pairs) reader/writer |
-| `UnrealPakCodec.cs` | Pure-C# `.pak` v4–v12 reader, v8/v11/v12 drop-in `*_Locara_P.pak` writer, UE5 IoStore streaming `PatchExistingPak`, `.locres` + `StringTable` `.uasset`/`.uexp` + bilingual `.ufont`/`.ttf` patcher |
+| `UnrealPakCodec.cs` | Pure-C# `.pak` v4–v12 reader (including AES-256 ECB encrypted index & payload decryption), v8/v11/v12 drop-in `*_Locara_P.pak` writer, UE5 IoStore streaming `PatchExistingPak`, `.locres` + `StringTable` `.uasset`/`.uexp` + bilingual `.ufont`/`.ttf` patcher |
 | `GodotTranslationFormat.cs` | Pure-C# Godot 3 & 4 `RSRC` and compressed `RSCC` (`FastLZ`, `Zlib/Deflate`, `Zstd`, `Gzip`) `.translation` (`OptimizedTranslation` / `PHashTranslation` with SMAZ + `Translation`) |
 | `Translation.cs` / `TranslationTeam.cs` | Token masking/validation, API providers, `ArabicPromptPresets` (6 genre presets), parallel Supervisor/Translator/Reviewer team, transient network retry (`CanRetry`) |
 | `PackageInstaller.cs` / `SteamGameTrial.cs` / `StarTruckerTrial.cs` | SHA-256 verified in-place install/restore (supports newly added drop-in files & companion `.uexp` files) + Steam auto-restore trials |

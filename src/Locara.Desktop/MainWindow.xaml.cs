@@ -101,7 +101,8 @@ public partial class MainWindow:Window
                     UnityWrap: project.Get("unity_arabic_wrap"),
                     UnityScale: project.Get("unity_arabic_font_scale"),
                     UnityShaping: project.Get("unity_arabic_shaping"),
-                    UnityContrast: project.Get("unity_arabic_contrast"));
+                    UnityContrast: project.Get("unity_arabic_contrast"),
+                    UnrealAesKey: project.Get(ProjectService.UnrealAesKeySetting));
             });
             if (!IsLoaded) return false;
 
@@ -131,6 +132,7 @@ public partial class MainWindow:Window
             RefreshScannedFiles();
             PackageChoices.ItemsSource = null;
             ZipPassword.Clear();
+            UnrealAesKey.Text = opened.UnrealAesKey;
             ScanLog.Clear();
             BuildLog.Clear();
             TeamStatus.Text = "";
@@ -584,17 +586,23 @@ public partial class MainWindow:Window
             Status.Text = "اختر مصدراً للفحص أولاً.";
             return;
         }
-        string path = projectPath, password = ZipPassword.Password, engine = Selected(Engine);
+        string path = projectPath, password = ZipPassword.Password, engine = Selected(Engine), aesKey = UnrealAesKey.Text.Trim();
+        if (aesKey.Length > 0 && !ProjectSettings.IsValidUnrealAesKey(aesKey))
+        {
+            Status.Text = "مفتاح Unreal AES غير صالح — يجب أن يكون 64 حرف Hex (مع أو بدون 0x) أو 44 حرف Base64 (256-بت).";
+            SourceAdvancedExpander.IsExpanded = true;
+            return;
+        }
         await Run(async cancellation =>
         {
             var result = await Task.Run(() =>
             {
                 using var project = new ProjectStore(path);
-                project.Set("engine", engine);
+                var projSettings = new ProjectSettings(project) { Engine = engine, UnrealAesKey = aesKey };
                 var service = new ProjectService(project);
                 var scan = service.Scan(password, cancellation);
                 return (Scan: scan, Capability: service.Capabilities(password, cancellation),
-                    Version: project.Get("scan_version"), View: openEditor ? ReadEditorView(project, project.Info.Source) : null);
+                    Version: projSettings.ScanVersion, View: openEditor ? ReadEditorView(project, project.Info.Source) : null);
             }, cancellation);
             var scan = result.Scan;
             SetCapabilities(result.Capability, result.Version);
@@ -602,6 +610,8 @@ public partial class MainWindow:Window
                 + $"{scan.Files} ملفات / {scan.Units} نصوص\n"
                 + DescribeCapability(result.Capability) + "\n"
                 + string.Join('\n', scan.Diagnostics.Select(item => item.Path + " — " + item.Message));
+            bool needsAesHint = scan.Units == 0 && scan.Diagnostics.Any(d => d.Message.Contains("AES", StringComparison.OrdinalIgnoreCase));
+            if (needsAesHint) SourceAdvancedExpander.IsExpanded = true;
             ScanLogExpander.IsExpanded = scan.Diagnostics.Count > 0 || scan.Units == 0;
             RefreshScannedFiles();
             if (openEditor && scan.Units > 0)

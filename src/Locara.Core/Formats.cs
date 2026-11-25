@@ -12,13 +12,15 @@ namespace Locara.Core;
 
 public static class Formats
 {
-    public static IReadOnlyList<IFormatHandler> All { get; } = [new JsonFormat(), new DelimitedFormat(','), new DelimitedFormat('\t'), new XmlFormat(), new IniFormat(), new YamlFormat(), TomlFormat.Instance, StringsFormat.Instance, LuaFormat.Instance, new PoFormat(), new SpreadsheetFormat(), new RenpyFormat(), new UnityBundleFormat(), UnityI2Format.Instance, UnityAssetsFormat.Instance, UnrealLocresFormat.Instance, UnrealStringTableFormat.Instance, UnrealPakFormat.Instance, GodotTranslationFormat.Instance, XUnityTranslationFormat.Instance, LocalizationTextFormat.Instance];
+    public static IReadOnlyList<IFormatHandler> All { get; } =
+        LocalizationProviderRegistry.All.Select(p => p.Handler).ToArray();
     internal static bool IsArabicTarget(string? language) => string.IsNullOrWhiteSpace(language)
         || language.Split('-', '_')[0].Equals("ar", StringComparison.OrdinalIgnoreCase)
         || language.Equals("arabic", StringComparison.OrdinalIgnoreCase);
     public static IFormatHandler? For(string path) => All.FirstOrDefault(f => f.Supports(path));
 
-    public static bool Configurable(string path) => For(path) is DelimitedFormat or SpreadsheetFormat or JsonFormat or XmlFormat or IniFormat or YamlFormat or TomlFormat or LuaFormat;
+    public static bool Configurable(string path) =>
+        For(path) is { } fmt && LocalizationProviderRegistry.TryGetByName(fmt.Name, out var p) && p.Metadata.IsConfigurable;
 
     internal static ExtractionPreview Inspect(byte[] bytes, IFormatHandler format, ExtractionRule? rule) => format switch
     {
@@ -330,17 +332,23 @@ public sealed class XmlFormat : IFormatHandler
 
 public sealed class IniFormat : IFormatHandler
 {
-    public string Name=>"ini";
-    public bool Supports(string path)=>Path.GetExtension(path).Equals(".ini",StringComparison.OrdinalIgnoreCase);
-    private static IEnumerable<(string Key,int Line,string Prefix,string Value)> Entries(string[] lines)
+    public string Name => "ini";
+    public bool Supports(string path) => Path.GetExtension(path).Equals(".ini", StringComparison.OrdinalIgnoreCase);
+    private static IEnumerable<(string Key, int Line, string Prefix, string Value)> Entries(string[] lines)
     {
-        string section=""; var seen=new HashSet<string>();
-        for(int i=0;i<lines.Length;i++)
+        string section = "";
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < lines.Length; i++)
         {
-            string s=lines[i].Trim(); if(s.StartsWith('[')&&s.EndsWith(']')) {section=s;continue;}
-            int pos=lines[i].IndexOf('='); if(pos<0||s.StartsWith(';')||s.StartsWith('#'))continue;
-            string key=section+"/"+lines[i][..pos].Trim(); if(!seen.Add(key))throw new InvalidDataException("Duplicate INI key.");
-            yield return (key,i,lines[i][..(pos+1)],lines[i][(pos+1)..]);
+            string s = lines[i].Trim();
+            if (s.StartsWith('[') && s.EndsWith(']')) { section = s; continue; }
+            int pos = lines[i].IndexOf('=');
+            if (pos < 0 || s.StartsWith(';') || s.StartsWith('#')) continue;
+            string baseKey = section + "/" + lines[i][..pos].Trim();
+            int occurrence = counts.GetValueOrDefault(baseKey) + 1;
+            counts[baseKey] = occurrence;
+            string locator = occurrence == 1 ? baseKey : $"{baseKey}#{occurrence}";
+            yield return (locator, i, lines[i][..(pos + 1)], lines[i][(pos + 1)..]);
         }
     }
     public IReadOnlyList<TextSlot> Extract(byte[] bytes) =>

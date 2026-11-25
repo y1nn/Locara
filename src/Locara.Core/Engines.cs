@@ -30,7 +30,7 @@ public static class Engines
         + @"|(?:^|/)(?:MonoBleedingEdge|Mono/etc|_CommonRedist|Redist|DirectX|vcredist|EasyAntiCheat|BattlEye|CrashHandler|steam_settings)/.+|"
         + @"(?:^|/)UnityCrashHandler[^/]*$"
         + @"|(?:^|/)(?:Locara_Arabic_P|[^/]+_Locara_P)\.pak$"
-        + @"|(?:^|/)Engine/Config/StagedBuild_[^/]+\.ini$"
+        + @"|(?:^|/)(?:Engine/Config/[^/]+\.ini|[^/]+/Config/Default[^/]+\.ini)$"
         + @"|\.(?:deps|runtimeconfig)\.json$"
         + @"|\.(?:exe|dll)\.config$"
         + @"|(?:^|/)(?:package-lock\.json|manifest\.webmanifest|app\.manifest|dxvk\.conf|steam_appid\.txt)$",

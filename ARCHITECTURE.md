@@ -8,15 +8,15 @@
 
 | Project | Target | Responsibility |
 |---|---|---|
-| `src/Locara.Core` | `net10.0` | Engine detection, container codecs, binary & text format handlers, Arabic shaping/wrap/font patching, 3-layer smart discovery & deployment advisor, SQLite project store, AI translation team & prompt presets, usage ledger, verified installer & Steam trial manager |
+| `src/Locara.Core` | `net10.0` | Unified `ILocalizationProvider` registry, engine detection, container codecs, binary & text format handlers, `ArabicTextEngine` shaping/wrap/font patching, 3-layer smart discovery & deployment advisor, typed `ProjectSettings` + SQLite project store, AI translation team & prompt presets, usage ledger, verified installer & Steam trial manager |
 | `src/Locara.Desktop` | `net10.0-windows` | Arabic RTL WPF workbench (`MainWindow` split across feature partials: Overview, Games, Files, Translation, Team, Usage, Fonts, Install) + `ScoutPlanWindow` + Windows Credential Manager integration |
-| `src/Locara.Cli` | `net10.0` | Scriptable headless CLI exposing project scan, file/cluster discovery, AI Scout, deployment advice, translation, build, XUnity export, install, and restore |
-| `checks/Locara.Checks` | `net10.0` | Automated xUnit test suite (`75` tests covering codecs, formats, engines, lazy-skip archive scanning, Arabic shaping/wrap/TMP contrast, SQLite migrations, smart discovery & AI Scout, AI team concurrency/presets, and install/restore safety) |
+| `src/Locara.Cli` | `net10.0` | Scriptable headless CLI exposing project scan (`--aes-key`), `aes-key`, file/cluster discovery, AI Scout, deployment advice, translation, build, XUnity export, install, and restore |
+| `checks/Locara.Checks` | `net10.0` | Automated xUnit test suite (`90` tests covering provider registry, codecs, formats, Unreal AES-256 `.pak` decryption, two-pass lazy-skip scanning, Arabic shaping/wrap/BBCode/TMP contrast, SQLite migrations, smart discovery & AI Scout, AI team resilience/salvage, and install/restore safety) |
 
 Build & CI invariants enforced in `Directory.Build.props`, `global.json`, and `.github/workflows/ci.yml`:
 - .NET SDK pinned to `10.0.404` (`rollForward: latestPatch`).
 - `TreatWarningsAsErrors=true`, `Nullable=enable`, `RestorePackagesWithLockFile=true`.
-- Automated GitHub Actions CI runs privacy/leak checks, locked NuGet restore, Release build, and all `75` xUnit tests on every push and pull request.
+- Automated GitHub Actions CI runs privacy/leak checks, locked NuGet restore, Release build, and all `90` xUnit tests on every push and pull request.
 
 ---
 
@@ -66,10 +66,10 @@ User-level settings live in `%LOCALAPPDATA%\Locara` (with automatic read fallbac
 - **`UnrealLocresFormat` (`unreal-locres`)**: Pure-C# `.locres` v0–v3 reader/writer preserving `Namespace`, `Key`, `FTextKey` hashes, `SourceStringHash`, ref-counted string pool, and writing Arabic/non-ASCII as UTF-16LE `FString`.
 - **`UnrealStringTableFormat` (`unreal-stringtable`)**: Pure-C# UE4/UE5 `UStringTable` `.uasset` reader/writer supporting both standalone single-file `.uasset` packages and cooked split `.uasset` + `.uexp` pairs (on disk and inside `.pak` archives), updating `FObjectExport.SerialSize` and preserving metadata comments.
 - **`UnrealPakCodec` & `UnrealPakFormat` (`unreal-pak`)**:
-  - Reads UE4/UE5 `.pak` v4–v12 (None/Zlib/Gzip/LZ4) with clear diagnostics for AES-encrypted or Oodle-compressed archives.
+  - Reads UE4/UE5 `.pak` v4–v12 (None/Zlib/Gzip/LZ4) including **AES-256 ECB encrypted** indexes and entries when a 256-bit key (`0x...` hex or Base64) is configured via `ProjectSettings.UnrealAesKey`, with clear Arabic diagnostics for missing/mismatched AES keys or Oodle-compressed archives.
   - Extracts primary game `.locres` and `UStringTable` `.uasset`/`.uexp` assets while ignoring Chromium `.pak` and `Engine/*` boilerplate.
   - **Non-IoStore games:** Emits a drop-in patch archive (`<BasePakStem>_Locara_P.pak`) in `Content/Paks/` (v8/v11/v12, including `PrunedDirectoryIndex` inside `PathHashIndex` and UE5.5+ v12 non-null-terminated filenames).
-  - **UE5 IoStore games (`.pak` + companion `.utoc`):** Streams an in-place patch of the base `.pak` via `UnrealPakCodec.PatchExistingPak` so UE5 never rejects standalone `_P.pak` files with `utoc not found`.
+  - **UE5 IoStore games (`.pak` + companion `.utoc`):** Streams an in-place patch of the base `.pak` via `UnrealPakCodec.PatchExistingPak` (preserving AES index encryption when present) so UE5 never rejects standalone `_P.pak` files with `utoc not found`.
   - **Bilingual Font Injection:** Automatically injects a bilingual Arabic+Latin font (`ArabicFontCatalog.ResolveForUnreal`) into game `.ufont`/`.ttf` assets, auto-detecting UE4 raw TTF vs UE5 8-byte envelope wrapping.
 
 ### Godot Binary `.translation` Pipeline (`GodotTranslationFormat.cs`)
@@ -79,7 +79,7 @@ User-level settings live in `%LOCALAPPDATA%\Locara` (with automatic read fallbac
 
 ### Additional Engines & Structured Text Formats (`Engines.cs`, `Formats.cs`, `CatalogFormats.cs`, `StructuredTextFormats.cs`)
 - **Ren’Py** (`.rpy` `game/tl/arabic` templates + SDK generation), **RPG Maker MV/MZ** (`data/*.json` + event codes `401`/`405`/`102`/`402`), and **GameMaker** (`data.win`/`game.unx` detection, external localization files, Steam trial integration, and `STRG` compiled-archive diagnostics).
-- **Structured & Catalog Formats:** `JSON`, `CSV`/`TSV`, `XML`/`XLIFF`, `INI`, `YAML`, **`TOML`** (comment/type-preserving `[table]` & `[[array_of_tables]]`), **`.strings`** (UTF-8 / UTF-16LE / UTF-16BE BOM-preserving with `/* ... */` & `//` comment context), **`Lua`** (lexer-safe table string extractor/rewriter), `PO`/`POT` (with `.pot -> .po` sibling/Arabic target delivery), and `XLSX`.
+- **Structured & Catalog Formats:** `JSON` (including JSONC comments, trailing commas, and BOM preservation), `CSV`/`TSV`, `XML`/`XLIFF`, `INI` (including lossless repeated keys), `YAML`, **`TOML`** (comment/type-preserving `[table]` & `[[array_of_tables]]`), **`.strings`** (UTF-8 / UTF-16LE / UTF-16BE BOM-preserving with `/* ... */` & `//` comment context), **`Lua`** (lexer-safe table string extractor/rewriter), **`LocalizationTextFormat` (`loc-txt`)** (lossless `.txt` handler for explicit localization folders supporting quoted/unquoted `key=value`, `TSV`, and line-by-line layouts), `PO`/`POT` (with `.pot -> .po` sibling/Arabic target delivery), and `XLSX`.
 
 ---
 

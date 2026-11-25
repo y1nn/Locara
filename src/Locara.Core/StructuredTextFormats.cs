@@ -1111,7 +1111,7 @@ public sealed class LocalizationTextFormat : IFormatHandler
     {
         if (!path.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) return false;
         if (XUnityTranslationFormat.Instance.Supports(path)) return false;
-        if (!ProjectService.IsExplicitLocalizationDirectory(path)) return false;
+        if (!LocaleClassifier.IsExplicitLocalizationDirectory(path)) return false;
         string stem = Path.GetFileNameWithoutExtension(path).Trim();
         if (stem.Length == 0) return false;
         string normalizedStem = stem.Trim('_').Trim('-');
