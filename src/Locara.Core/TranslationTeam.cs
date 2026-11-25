@@ -27,7 +27,7 @@ public sealed record TeamRequest(string Role, string Model, string Instructions,
 public sealed record TeamNote(string Id, string Source, string Draft, string Suggestion, string Issue);
 public sealed record AgentActivity(int WorkerId, string Role, string Stage, string Section,
     int BatchId, int RowCount, string Detail, TokenUsage? DeltaTokens = null,
-    string Model = "", string Profile = "");
+    string Model = "", string Profile = "", string? SampleSource = null, string? SampleTarget = null);
 public sealed record TeamProgress(int Completed, int Total, int Unknown, int Saved, TranslationUsage Usage,
     string Section = "", string PauseReason = "", AgentActivity? Activity = null);
 
@@ -385,6 +385,8 @@ public sealed class TranslationTeam(ProjectStore store)
         }
     }
 
+    public string WorldBrief(TeamPlan plan) => ReadSupervisor(store, plan.Id).WorldBrief ?? "";
+
     public async Task<TeamProgress> Run(TeamPlan plan, ProviderOptions options, IProgress<TeamProgress>? progress,
         CancellationToken cancellation = default, Func<TeamRequest, CancellationToken, Task<string>>? send = null,
         bool approveReviewed = false, int? overrideWorkers = null, bool? overrideFastMode = null,
@@ -660,9 +662,9 @@ public sealed class TranslationTeam(ProjectStore store)
                     }
                     batches.Add(updatedBatch);
                 }
-                plan = plan with { Batches = batches.ToArray() };
-                store.Execute("UPDATE team_runs SET supervisor_inflight=0, pause_reason='', active=1, connection=$conn, settings_json=$set WHERE id=$id",
-                    ("$conn", plan.Connection), ("$set", Serialize(plan.Settings)), ("$id", plan.Id));
+                plan = plan with { Batches = batches.ToArray(), Glossary = store.Glossary() };
+                store.Execute("UPDATE team_runs SET supervisor_inflight=0, pause_reason='', active=1, connection=$conn, settings_json=$set, glossary_json=$gl WHERE id=$id",
+                    ("$conn", plan.Connection), ("$set", Serialize(plan.Settings)), ("$gl", Serialize(plan.Glossary)), ("$id", plan.Id));
             }
             else
             {
@@ -842,10 +844,27 @@ public sealed class TranslationTeam(ProjectStore store)
                 int savedNow = Apply(worker, plan, batch, work, approveReviewed, laneSession);
                 Interlocked.Increment(ref telemetry.Completed);
                 Interlocked.Add(ref telemetry.Saved, savedNow);
+                string? sampleSrc = null, sampleTgt = null;
+                if (savedNow > 0 && work.Drafts != null)
+                {
+                    for (int i = batch.Rows.Length - 1; i >= 0; i--)
+                    {
+                        var r = batch.Rows[i];
+                        if (work.Skipped?.Contains(r.Id) == true) continue;
+                        if (work.Reviews != null && work.Reviews.TryGetValue(r.Id, out var rv) && !rv.Ok) continue;
+                        if (work.Drafts.TryGetValue(r.Id, out var d) && !string.IsNullOrWhiteSpace(r.Source) && !string.IsNullOrWhiteSpace(d))
+                        {
+                            sampleSrc = r.Source;
+                            sampleTgt = d;
+                            break;
+                        }
+                    }
+                }
                 progress?.Report(telemetry.Snapshot(plan.Batches.Length, batch.Section,
                     new AgentActivity(workerId, $"وكيل #{workerId}", "مكتمل", batch.Section, batch.Id, savedNow,
                         $"أنجز دفعة #{batch.Id} ({savedNow}/{batch.Rows.Length} محفوظة)",
-                        Model: lastRoute.Model, Profile: lastRoute.ProfileName)));
+                        Model: lastRoute.Model, Profile: lastRoute.ProfileName,
+                        SampleSource: sampleSrc, SampleTarget: sampleTgt)));
                 return true;
             }
 
@@ -955,10 +974,27 @@ public sealed class TranslationTeam(ProjectStore store)
                 int savedNow = Apply(worker, plan, batch, work, approveReviewed, laneSession);
                 Interlocked.Increment(ref telemetry.Completed);
                 Interlocked.Add(ref telemetry.Saved, savedNow);
+                string? sampleSrc = null, sampleTgt = null;
+                if (savedNow > 0 && work.Drafts != null)
+                {
+                    for (int i = batch.Rows.Length - 1; i >= 0; i--)
+                    {
+                        var r = batch.Rows[i];
+                        if (work.Skipped?.Contains(r.Id) == true) continue;
+                        if (work.Reviews != null && work.Reviews.TryGetValue(r.Id, out var rv) && !rv.Ok) continue;
+                        if (work.Drafts.TryGetValue(r.Id, out var d) && !string.IsNullOrWhiteSpace(r.Source) && !string.IsNullOrWhiteSpace(d))
+                        {
+                            sampleSrc = r.Source;
+                            sampleTgt = d;
+                            break;
+                        }
+                    }
+                }
                 progress?.Report(telemetry.Snapshot(plan.Batches.Length, batch.Section,
                     new AgentActivity(workerId, $"وكيل #{workerId}", "مكتمل", batch.Section, batch.Id, savedNow,
                         $"أنجز دفعة #{batch.Id} ({savedNow}/{batch.Rows.Length} محفوظة)",
-                        Model: lastRoute.Model, Profile: lastRoute.ProfileName)));
+                        Model: lastRoute.Model, Profile: lastRoute.ProfileName,
+                        SampleSource: sampleSrc, SampleTarget: sampleTgt)));
                 return true;
             }
             var masked = rows.ToDictionary(row => row.Id, row => Tokens.Mask(row.Source, plan.Engine));

@@ -16,6 +16,37 @@ public static class Tokens
     public static List<string> Find(string text, string engine = "") =>
         Pattern(engine).Matches(text).Select(m => m.Value).Order(StringComparer.Ordinal).ToList();
 
+    public static List<TokenInspection> Inspect(string source, string target, string engine = "")
+    {
+        var regex = Pattern(engine);
+        var order = new List<string>();
+        var expected = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (Match m in regex.Matches(source ?? ""))
+        {
+            if (!expected.TryGetValue(m.Value, out int count))
+            {
+                order.Add(m.Value);
+                expected[m.Value] = 1;
+            }
+            else
+            {
+                expected[m.Value] = count + 1;
+            }
+        }
+        if (order.Count == 0) return [];
+
+        var present = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (Match m in regex.Matches(target ?? ""))
+        {
+            present[m.Value] = present.GetValueOrDefault(m.Value) + 1;
+        }
+
+        var result = new List<TokenInspection>(order.Count);
+        foreach (string tok in order)
+            result.Add(new TokenInspection(tok, expected[tok], present.GetValueOrDefault(tok)));
+        return result;
+    }
+
     public static string Validate(string source, string target, string engine = "")
     {
         var expected = Find(source, engine);
@@ -65,6 +96,10 @@ public static class Tokens
         return (masked, map);
     }
     public static string Restore(string target,Dictionary<string,string> map){foreach(var pair in map)target=target.Replace(pair.Key,pair.Value,StringComparison.Ordinal);return target;}
+}
+public sealed record TokenInspection(string Token, int ExpectedCount, int PresentCount)
+{
+    public bool IsSatisfied => PresentCount == ExpectedCount;
 }
 public sealed record TokenUsage(long InputTokens = 0, long OutputTokens = 0, long TotalTokens = 0)
 {
