@@ -112,6 +112,15 @@ public sealed class ProjectStore : IDisposable
         );
         """;
 
+    private const string V6Schema = """
+        CREATE TABLE IF NOT EXISTS bot_glossary(
+            source TEXT PRIMARY KEY COLLATE NOCASE,
+            target TEXT NOT NULL,
+            note TEXT NOT NULL DEFAULT '',
+            updated TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        """;
+
     public ProjectStore(string directory) : this(directory, 30) { }
 
     public ProjectStore(string directory, int commandTimeout)
@@ -126,7 +135,7 @@ public sealed class ProjectStore : IDisposable
         {
             connection.Open();
             Execute($"PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout={Math.Min(commandTimeout, 15) * 1000};");
-            if (SchemaVersion() != 5) Upgrade();
+            if (SchemaVersion() != 6) Upgrade();
         }
         catch { connection.Dispose(); throw; }
     }
@@ -178,7 +187,21 @@ public sealed class ProjectStore : IDisposable
                 Execute("PRAGMA user_version=5;");
                 version = 5;
             }
-            if (version != 5) throw new InvalidDataException("Unsupported project database version.");
+            if (version == 5)
+            {
+                Execute(V6Schema);
+                var runCols = Query("PRAGMA table_info(team_runs)", row => row.GetString(1)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (!runCols.Contains("world_brief"))
+                    Execute("ALTER TABLE team_runs ADD COLUMN world_brief TEXT NOT NULL DEFAULT '';");
+                if (!runCols.Contains("auto_glossary_json"))
+                    Execute("ALTER TABLE team_runs ADD COLUMN auto_glossary_json TEXT NOT NULL DEFAULT '';");
+                var batchCols = Query("PRAGMA table_info(team_batches)", row => row.GetString(1)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (!batchCols.Contains("context_tail_json"))
+                    Execute("ALTER TABLE team_batches ADD COLUMN context_tail_json TEXT NOT NULL DEFAULT '';");
+                Execute("PRAGMA user_version=6;");
+                version = 6;
+            }
+            if (version != 6) throw new InvalidDataException("Unsupported project database version.");
             Execute("COMMIT");
         }
         catch { Execute("ROLLBACK"); throw; }
@@ -261,12 +284,15 @@ public sealed class ProjectStore : IDisposable
                 CREATE TABLE glossary(source TEXT PRIMARY KEY,target TEXT NOT NULL);
                 CREATE TABLE attempts(id INTEGER PRIMARY KEY,unit_id TEXT NOT NULL,provider TEXT NOT NULL,state TEXT NOT NULL,created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
                 CREATE TABLE sources(path TEXT PRIMARY KEY COLLATE NOCASE, scope TEXT NOT NULL UNIQUE);
-                """ + "\n" + V3Schema + "\n" + V5Schema + "\n"
+                """ + "\n" + V3Schema + "\n" + V5Schema + "\n" + V6Schema + "\n"
                 + """
                 ALTER TABLE team_runs ADD COLUMN used_input_tokens INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE team_runs ADD COLUMN used_output_tokens INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE team_runs ADD COLUMN used_total_tokens INTEGER NOT NULL DEFAULT 0;
-                PRAGMA user_version=5;
+                ALTER TABLE team_runs ADD COLUMN world_brief TEXT NOT NULL DEFAULT '';
+                ALTER TABLE team_runs ADD COLUMN auto_glossary_json TEXT NOT NULL DEFAULT '';
+                ALTER TABLE team_batches ADD COLUMN context_tail_json TEXT NOT NULL DEFAULT '';
+                PRAGMA user_version=6;
                 """;
             cmd.ExecuteNonQuery();
         }
@@ -447,6 +473,37 @@ public sealed class ProjectStore : IDisposable
     public void Glossary(string source, string target) => Execute("INSERT INTO glossary VALUES($s,$t) ON CONFLICT(source) DO UPDATE SET target=excluded.target", ("$s", source), ("$t", target));
     public Dictionary<string,string> Glossary() => Query("SELECT source,target FROM glossary", r => (r.GetString(0), r.GetString(1))).ToDictionary(x => x.Item1, x => x.Item2);
     public void RemoveTerm(string source) => Execute("DELETE FROM glossary WHERE source=$s", ("$s", source));
+
+    public Dictionary<string, string> BotGlossary() =>
+        Query("SELECT source, target FROM bot_glossary", r => (r.GetString(0), r.GetString(1)))
+            .ToDictionary(x => x.Item1, x => x.Item2, StringComparer.OrdinalIgnoreCase);
+
+    public void SaveBotTerms(IReadOnlyDictionary<string, string> terms, string note = "")
+    {
+        if (terms.Count == 0) return;
+        Execute("BEGIN IMMEDIATE");
+        try
+        {
+            foreach (var (src, tgt) in terms)
+            {
+                string s = (src ?? "").Trim();
+                string t = (tgt ?? "").Trim();
+                if (s.Length == 0 || t.Length == 0) continue;
+                Execute("""
+                    INSERT INTO bot_glossary(source, target, note, updated)
+                    VALUES($s, $t, $n, CURRENT_TIMESTAMP)
+                    ON CONFLICT(source) DO UPDATE SET
+                        target = excluded.target,
+                        note = excluded.note,
+                        updated = CURRENT_TIMESTAMP
+                    """, ("$s", s), ("$t", t), ("$n", note ?? ""));
+            }
+            Execute("COMMIT");
+        }
+        catch { Execute("ROLLBACK"); throw; }
+    }
+
+    public void ClearBotGlossary() => Execute("DELETE FROM bot_glossary");
 
     public List<Unit> MemoryFor(Unit unit) => Query("""
         SELECT id,path,locator,source,target,context,status,warning,revision,imported FROM units
