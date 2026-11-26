@@ -9,7 +9,7 @@ public sealed record TeamSettings(string Style = "", string Supervisor = "", str
     string SupervisorModel = "", string TranslatorModel = "", string ReviewerModel = "", int Workers = 0,
     int BatchSize = 0, bool FastMode = false, bool ReviewDrafts = false,
     string SupervisorProfile = "", string TranslatorProfile = "", string ReviewerProfile = "",
-    Dictionary<int, AgentTarget>? WorkerTargets = null, bool SmartReview = false);
+    Dictionary<int, AgentTarget>? WorkerTargets = null, bool SmartReview = false, bool IncludeApproved = false);
 public sealed record TeamRow(string Id, long Revision, string Source, string Context, string ExistingTarget = "");
 public sealed record TeamBatch(int Id, string Section, TeamRow[] Rows);
 public sealed record TeamPlan(string Id, string Scope, string Package, string Engine, string Connection, TeamSettings Settings,
@@ -228,7 +228,8 @@ public sealed class TranslationTeam(ProjectStore store)
         var profileMap = NormalizeProfiles(profiles);
         ValidateSettings(options, settings, profileMap);
         var filtered = settings.ReviewDrafts
-            ? selection.Where(row => row.Status is "translated" or "imported" && !string.IsNullOrWhiteSpace(row.Target))
+            ? selection.Where(row => (row.Status is "translated" or "imported" || (settings.IncludeApproved && row.Status == "approved"))
+                && !string.IsNullOrWhiteSpace(row.Target))
             : selection.Where(row => row.Status == "pending");
         var sections = filtered.DistinctBy(row => row.Id)
             .GroupBy(SectionName)
@@ -615,8 +616,11 @@ public sealed class TranslationTeam(ProjectStore store)
                 if (overrideSettings != null) plan = plan with { Settings = overrideSettings };
                 if (overrideConnection != null) plan = plan with { Connection = overrideConnection };
                 bool reviewDrafts = plan.Settings.ReviewDrafts;
+                bool includeApproved = reviewDrafts && plan.Settings.IncludeApproved;
                 var candidates = reviewDrafts
-                    ? store.Units(limit: -1, status: "review").Where(row => row.Target.Length > 0).ToDictionary(row => row.Id)
+                    ? (includeApproved
+                        ? store.Units(limit: -1).Where(row => row.Status is "translated" or "imported" or "approved" && row.Target.Length > 0).ToDictionary(row => row.Id)
+                        : store.Units(limit: -1, status: "review").Where(row => row.Target.Length > 0).ToDictionary(row => row.Id))
                     : store.Units(limit: -1, status: "pending").Where(row => row.Target.Length == 0).ToDictionary(row => row.Id);
                 var batches = new List<TeamBatch>();
                 foreach (var batch in plan.Batches)
@@ -902,7 +906,7 @@ public sealed class TranslationTeam(ProjectStore store)
             }
             else if (reviewDrafts && work.Stage == "review" && work.Skipped == null)
             {
-                var skipped = batch.Rows.Where(row => !Unchanged(worker.UnitsById(row.Id), row, reviewDrafts: true))
+                var skipped = batch.Rows.Where(row => !Unchanged(worker.UnitsById(row.Id), row, reviewDrafts: true, plan.Settings.IncludeApproved))
                     .Select(row => row.Id).ToArray();
                 work = work with { Skipped = skipped };
             }
@@ -1370,7 +1374,7 @@ public sealed class TranslationTeam(ProjectStore store)
                     ? existingVerdict
                     : new Review(false, "لم تكتمل مراجعة هذا السطر.", "");
                 var current = worker.UnitsById(row.Id);
-                if (current == null || !Unchanged(current, row, reviewDrafts))
+                if (current == null || !Unchanged(current, row, reviewDrafts, plan.Settings.IncludeApproved))
                     notes.Add(new(row.Id, row.Source, target, verdict.Suggestion ?? "", "تغيّر السطر أثناء عمل الفريق."));
                 else if (!verdict.Ok)
                     notes.Add(new(row.Id, row.Source, target, verdict.Suggestion ?? "", verdict.Reason ?? ""));
@@ -1402,9 +1406,11 @@ public sealed class TranslationTeam(ProjectStore store)
         catch { worker.Execute("ROLLBACK"); throw; }
     }
 
-    private static bool Unchanged(Unit? current, TeamRow row, bool reviewDrafts) =>
+    private static bool Unchanged(Unit? current, TeamRow row, bool reviewDrafts, bool includeApproved = false) =>
         current != null
-        && (reviewDrafts ? current.Status is "translated" or "imported" : current.Status == "pending")
+        && (reviewDrafts
+            ? (current.Status is "translated" or "imported" || (includeApproved && current.Status == "approved"))
+            : current.Status == "pending")
         && current.Revision == row.Revision && current.Source == row.Source;
 
     private static TeamRequest Request(TeamPlan plan, ResolvedRoute route, int workerId, string role, object payload,
@@ -1503,7 +1509,10 @@ public sealed class TranslationTeam(ProjectStore store)
     public TranslationUsage EstimateResumeBudget(TeamPlan plan)
     {
         bool reviewDrafts = plan.Settings.ReviewDrafts;
-        var candidates = store.Units(limit: -1, status: reviewDrafts ? "review" : "pending").ToDictionary(row => row.Id);
+        bool includeApproved = reviewDrafts && plan.Settings.IncludeApproved;
+        var candidates = includeApproved
+            ? store.Units(limit: -1).Where(row => row.Status is "translated" or "imported" or "approved" && row.Target.Length > 0).ToDictionary(row => row.Id)
+            : store.Units(limit: -1, status: reviewDrafts ? "review" : "pending").ToDictionary(row => row.Id);
         var usage = ReadUsage(store, plan.Id);
         long requests = usage.Requests, characters = usage.Characters;
         long average = usage.Requests == 0 ? 0 : usage.Characters / usage.Requests;

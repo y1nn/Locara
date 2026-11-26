@@ -152,4 +152,6 @@ public static class LocaraPaths
             return Directory.Exists(legacy) ? legacy : primary;
         }
     }
+
+    public static string SharedMemoryDatabasePath => Path.Combine(UserDataDirectory, "translation-memory.db");
 }

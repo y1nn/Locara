@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace Locara.Core;
@@ -324,7 +326,7 @@ public sealed class LiveGlossary
 /// </summary>
 public sealed class SceneSessionState(int maxTurns = 2, int maxHistoryChars = 2400, int maxContextLines = 6)
 {
-    private readonly object sync = new();
+    private readonly Lock sync = new();
     private readonly List<(ChatTurn User, ChatTurn Assistant)> turns = [];
     private readonly List<ContextLine> contextTail = [];
 
@@ -359,8 +361,8 @@ public sealed class SceneSessionState(int maxTurns = 2, int maxHistoryChars = 24
         for (int start = 0; start < slice.Count; start++)
         {
             var sub = slice[start..];
-            var uEntries = sub.Select((l, i) => new { id = (i + 1).ToString(), source = l.Source });
-            var aMap = sub.Select((l, i) => (Key: (i + 1).ToString(), l.Target))
+            var uEntries = sub.Select((l, i) => new { id = (i + 1).ToString(CultureInfo.InvariantCulture), source = l.Source });
+            var aMap = sub.Select((l, i) => (Key: (i + 1).ToString(CultureInfo.InvariantCulture), l.Target))
                 .ToDictionary(x => x.Key, x => x.Target, StringComparer.Ordinal);
             string uCand = System.Text.Json.JsonSerializer.Serialize(new { entries = uEntries });
             string aCand = System.Text.Json.JsonSerializer.Serialize(aMap);
@@ -436,7 +438,8 @@ public sealed class SceneSessionState(int maxTurns = 2, int maxHistoryChars = 24
 /// </summary>
 public static class SmartQaEvaluator
 {
-    private static readonly char[] NarrativePunctuation = ['?', '!', '؟', ',', '،', '"', '“', '”', '…', ';', '\n', '\r'];
+    private static readonly SearchValues<char> NarrativePunctuation =
+        SearchValues.Create(['?', '!', '؟', ',', '،', '"', '“', '”', '…', ';', '\n', '\r']);
 
     public static bool NeedsReview(TeamRow row, string draft, IReadOnlyDictionary<string, string>? matchedTerms)
     {
@@ -446,7 +449,7 @@ public static class SmartQaEvaluator
         if (tgt.Length == 0) return true;
 
         // 1. Any sentence/dialogue length or narrative punctuation (including period-terminated sentences) goes to Smart QA Bot
-        if (src.Length > 36 || src.IndexOfAny(NarrativePunctuation) >= 0
+        if (src.Length > 36 || src.AsSpan().IndexOfAny(NarrativePunctuation) >= 0
             || src.EndsWith('.') || src.Contains(". ", StringComparison.Ordinal)
             || src.Contains(": ", StringComparison.Ordinal))
             return true;

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>Locara.UnityRtlFix</AssemblyName>
+    <RootNamespace>Locara.UnityRtlFix</RootNamespace>
+    <Version>1.4.0</Version>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <DebugType>embedded</DebugType>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Stubs/**" />
+    <EmbeddedResource Remove="Stubs/**" />
+    <None Remove="Stubs/**" />
+    <Compile Include="..\Locara.Core\UnityClassicRtlReflow.cs" Link="UnityClassicRtlReflow.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="Stubs\UnityEngine\Locara.UnityEngine.Stub.csproj" Private="false" />
+    <ProjectReference Include="Stubs\BepInEx\Locara.BepInEx.Stub.csproj" Private="false" />
+  </ItemGroup>
+</Project>

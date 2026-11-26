@@ -471,6 +471,45 @@ public sealed class ProjectStore : IDisposable
             ORDER BY path,locator LIMIT $n OFFSET $o
             """, ReadUnit, ("$id", search), ("$s", "%" + search + "%"), ("$n", limit), ("$o", offset), ("$status", status));
     }
+    public List<Unit> UnitsByIds(IEnumerable<string> ids, string search = "", int offset = 0, int limit = 100)
+    {
+        var idSet = ids as IReadOnlySet<string> ?? ids.ToHashSet(StringComparer.Ordinal);
+        if (idSet.Count == 0) return [];
+        IEnumerable<Unit> matched = Units(search, offset: 0, limit: -1)
+            .Where(u => idSet.Contains(u.Id));
+        if (offset > 0) matched = matched.Skip(offset);
+        if (limit >= 0) matched = matched.Take(limit);
+        return matched.ToList();
+    }
+
+    internal List<Unit> ApplyPendingTranslations(IReadOnlyList<(Unit Unit, string Target)> matches, bool approve)
+    {
+        if (matches.Count == 0) return [];
+        var applied = new List<Unit>(matches.Count);
+        var commitCallbacks = new List<Action>(matches.Count);
+        Execute("BEGIN IMMEDIATE");
+        try
+        {
+            foreach (var (unit, target) in matches)
+            {
+                var current = UnitsById(unit.Id);
+                if (current == null || current.Status != "pending" || current.Source != unit.Source)
+                    continue;
+                current.Target = target;
+                try
+                {
+                    commitCallbacks.Add(WriteEdit(current, approve, pendingOnly: true));
+                    applied.Add(current);
+                }
+                catch (EditConflictException) { }
+            }
+            Execute("COMMIT");
+            foreach (var cb in commitCallbacks) cb();
+            return applied;
+        }
+        catch { Execute("ROLLBACK"); throw; }
+    }
+
     public Unit FindUnit(string id) => UnitsById(id) ?? throw new InvalidOperationException("Text unit not found.");
     internal static Unit ReadUnit(SqliteDataReader r) => new() { Id = r.GetString(0), Path = r.GetString(1), Locator = r.GetString(2), Source = r.GetString(3), Target = r.GetString(4), Context = r.GetString(5), Status = r.GetString(6), Warning = r.GetString(7), Revision = r.GetInt64(8), ImportedTarget = r.GetString(9) };
     public void Save(Unit unit, bool approve) => Save(unit, approve, false);

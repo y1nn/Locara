@@ -620,6 +620,42 @@ public sealed partial class ProjectService
             notice = notice.Length == 0 ? dynNote : notice + "\n" + dynNote;
         }
 
+        bool unityClassicRtlPluginBundled = false;
+        bool wantClassicRtlPlugin = settings.IncludeClassicUnityRtlPlugin;
+        if (!source.IsArchive && profile.Name == "unity" && wantClassicRtlPlugin && changes.Count > 0
+            && Directory.Exists(source.Path)
+            && UnityClassicRtlPlugin.DetectBackend(source.Path) != UnityScriptingBackend.Il2Cpp)
+        {
+            byte[] pluginDll = UnityClassicRtlPlugin.LoadPluginBytes();
+            byte[] pluginCfg = UnityClassicRtlPlugin.BuildDefaultConfigBytes(
+                fixPreShaped: true,
+                fixLogical: true);
+
+            foreach (var (relPath, payload) in new[]
+            {
+                (UnityClassicRtlPlugin.PluginRelativePath, pluginDll),
+                (UnityClassicRtlPlugin.ConfigRelativePath, pluginCfg)
+            })
+            {
+                if (changes.Any(c => c.Path.Equals(relPath, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+                string diskPath = Path.Combine(source.Path, relPath.Replace('/', Path.DirectorySeparatorChar));
+                string origHash = File.Exists(diskPath) ? PackageInstaller.FileHash(diskPath, cancellation) : "";
+                string afterHash = Identity.Hash(payload);
+                if (origHash == afterHash) continue;
+                expected[relPath] = afterHash;
+                changes.Add(new(relPath, origHash, afterHash));
+                stageChange?.Invoke(ResourceEntry.FromBytes(relPath, payload), payload);
+                unityClassicRtlPluginBundled = true;
+            }
+
+            if (unityClassicRtlPluginBundled)
+            {
+                string rtlNote = "تم إرفاق ملحق إصلاح التفاف الأسطر (Locara.UnityRtlFix) تلقائياً داخل مجلد BepInEx.";
+                notice = notice.Length == 0 ? rtlNote : notice + "\n" + rtlNote;
+            }
+        }
+
         string package = source.IsArchive ? source.OutputPath : "";
         IReadOnlyList<string> changedFiles = changes.Select(change => change.Path).Order(StringComparer.Ordinal).ToList();
         if (source.IsArchive && changes.Count > 0)
@@ -639,6 +675,8 @@ public sealed partial class ProjectService
                 unityAssetsArabicUpdated,
                 unityTmpStandalonePatched,
                 unityLooseFontsPatched,
+                unityClassicRtlPluginBundled,
+                wantClassicRtlPlugin,
                 gettextPoTarget,
                 gettextPoDelivered,
                 displayFont = displayFont.Id,

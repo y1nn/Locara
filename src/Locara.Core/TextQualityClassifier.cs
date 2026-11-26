@@ -120,6 +120,10 @@ public static partial class TextQualityClassifier
                 && stripped.Any(char.IsLetter) && stripped.Any(char.IsDigit))
                 return StringQuality.Technical;
 
+            // Single-token boolean/null config literals ("true", "false", "null", "nil", "nan") must not be treated as human words
+            if (IsBooleanOrNullLiteral(stripped))
+                return StringQuality.Technical;
+
             // Simple single word like "Start", "Back", "OK", "HP", "Options", "Play", "Alpha"
             if (SimpleHumanWordPattern().IsMatch(stripped))
                 return StringQuality.Human;
@@ -158,6 +162,13 @@ public static partial class TextQualityClassifier
 
         return StringQuality.Neutral;
     }
+
+    private static bool IsBooleanOrNullLiteral(string token) =>
+        token.Equals("true", StringComparison.OrdinalIgnoreCase)
+        || token.Equals("false", StringComparison.OrdinalIgnoreCase)
+        || token.Equals("null", StringComparison.OrdinalIgnoreCase)
+        || token.Equals("nil", StringComparison.OrdinalIgnoreCase)
+        || token.Equals("nan", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsOpenDataFormat(string? format) =>
         string.IsNullOrEmpty(format)

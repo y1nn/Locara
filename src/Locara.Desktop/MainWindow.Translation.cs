@@ -603,9 +603,21 @@ public partial class MainWindow
         {
             using var project = new ProjectStore(projectPath);
             var match = project.MemoryFor(row).FirstOrDefault();
-            if (match == null) { Status.Text = "لا توجد ترجمة معتمدة مطابقة للأصل."; return; }
-            ShowProposal(projectPath, row, match.Target, Tokens.Validate(row.Source, match.Target, scannedEngine),
-                "اقتراح الذاكرة — " + (match.Context.Length > 0 ? match.Context : match.Path));
+            if (match != null)
+            {
+                ShowProposal(projectPath, row, match.Target, Tokens.Validate(row.Source, match.Target, scannedEngine),
+                    "اقتراح الذاكرة — " + (match.Context.Length > 0 ? match.Context : match.Path));
+                return;
+            }
+            using var shared = SharedTranslationMemory.OpenDefault();
+            string? sharedMatch = shared.TryLookup(row.Source);
+            if (!string.IsNullOrWhiteSpace(sharedMatch))
+            {
+                ShowProposal(projectPath, row, sharedMatch, Tokens.Validate(row.Source, sharedMatch, scannedEngine),
+                    "اقتراح الذاكرة المشتركة (تطابق 100%)");
+                return;
+            }
+            Status.Text = "لا توجد ترجمة معتمدة مطابقة للأصل في المشروع أو الذاكرة المشتركة.";
         }
         catch (Exception error) { Status.Text = error.Message; }
     }
@@ -629,7 +641,10 @@ public partial class MainWindow
     {
         if (projectPath == null) return;
         using var project = new ProjectStore(projectPath);
-        Terms.ItemsSource = project.Glossary().OrderBy(pair => pair.Key).ToList();
+        var glossary = project.Glossary();
+        cachedManualGlossary = new Dictionary<string, string>(glossary, StringComparer.OrdinalIgnoreCase);
+        Terms.ItemsSource = glossary.OrderBy(pair => pair.Key).ToList();
+        PopulateEditorInspector(Rows.SelectedItem as Unit);
     }
 
     private void OpenTerm(object sender, SelectionChangedEventArgs e)

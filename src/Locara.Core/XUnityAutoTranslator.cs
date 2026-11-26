@@ -197,9 +197,11 @@ public static class XUnityAutoTranslatorExporter
         string textDir = Path.Combine(dest, "BepInEx", "Translation", "ar", "Text");
         string configDir = Path.Combine(dest, "BepInEx", "config");
         string fontDir = Path.Combine(dest, "BepInEx", "Translation", "ar", "Fonts");
+        string pluginDir = Path.Combine(dest, "BepInEx", "plugins", "Locara.UnityRtlFix");
         Directory.CreateDirectory(textDir);
         Directory.CreateDirectory(configDir);
         Directory.CreateDirectory(fontDir);
+        Directory.CreateDirectory(pluginDir);
 
         var seenSources = new HashSet<string>(StringComparer.Ordinal);
         var lines = new List<string>
@@ -239,6 +241,9 @@ public static class XUnityAutoTranslatorExporter
         byte[] fontBytes = ArabicFontCatalog.LoadBytes(fontChoice);
         File.WriteAllBytes(fontPath, fontBytes);
         ArabicFontCatalog.WriteLicense(fontDir, fontChoice);
+
+        File.WriteAllBytes(Path.Combine(pluginDir, "Locara.UnityRtlFix.dll"), UnityClassicRtlPlugin.LoadPluginBytes());
+        File.WriteAllBytes(Path.Combine(configDir, "Locara.UnityRtlFix.cfg"), UnityClassicRtlPlugin.BuildDefaultConfigBytes());
 
         string configFile = Path.Combine(configDir, "AutoTranslatorConfig.ini");
         string configContent = """
@@ -286,6 +291,7 @@ public static class XUnityAutoTranslatorExporter
             عدد النصوص المُصدّرة: {exported}
             وضع تشكيل العربية: {(displayOptions.ShapeArabic ? "مُفعّل (تشكيل مسبق لـ TextMeshPro)" : "مُعطّل (عربي منطقي RTL أصلي)")}
             الخط العربي المرفق: BepInEx/Translation/ar/Fonts/{safeFontName} ({fontChoice.DisplayName})
+            ملحق إصلاح التفاف الأسطر (UI.Text / NGUI): BepInEx/plugins/Locara.UnityRtlFix/Locara.UnityRtlFix.dll (مُرفق تلقائياً)
 
             خطوات الاستخدام للألعاب التي تخزّن نصوصها داخل الكود البرمجي (Hardcoded Unity):
             1. ثبّت BepInEx وإضافة XUnity.AutoTranslator-BepInEx في مجلد اللعبة.

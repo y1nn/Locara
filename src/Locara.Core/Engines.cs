@@ -31,6 +31,8 @@ public static class Engines
         + @"(?:^|/)UnityCrashHandler[^/]*$"
         + @"|(?:^|/)(?:Locara_Arabic_P|[^/]+_Locara_P)\.pak$"
         + @"|(?:^|/)(?:Engine/Config/[^/]+\.ini|[^/]+/Config/Default[^/]+\.ini)$"
+        + @"|(?:^|/)(?:Engine/Saved|[^/]+/Saved)/(?:Config|Logs|Crashes|SaveGames|Shaders|Telemetry|Temp|Screenshots|PersistentDownloadDir|PipelineCaches|WebCache[^/]*)/.+|"
+        + @"(?:^|/)Manifest_(?:NonUFSFiles|UFSFiles|DebugFiles)_[^/]+\.txt$"
         + @"|\.(?:deps|runtimeconfig)\.json$"
         + @"|\.(?:exe|dll)\.config$"
         + @"|(?:^|/)(?:package-lock\.json|manifest\.webmanifest|app\.manifest|dxvk\.conf|steam_appid\.txt)$",

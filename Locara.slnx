@@ -6,5 +6,8 @@
     <Project Path="src/Locara.Cli/Locara.Cli.csproj" />
     <Project Path="src/Locara.Core/Locara.Core.csproj" />
     <Project Path="src/Locara.Desktop/Locara.Desktop.csproj" />
+    <Project Path="src/Locara.UnityRtlFix/Locara.UnityRtlFix.csproj" />
+    <Project Path="src/Locara.UnityRtlFix/Stubs/BepInEx/Locara.BepInEx.Stub.csproj" />
+    <Project Path="src/Locara.UnityRtlFix/Stubs/UnityEngine/Locara.UnityEngine.Stub.csproj" />
   </Folder>
 </Solution>

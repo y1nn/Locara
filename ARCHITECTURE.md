@@ -9,7 +9,7 @@ Locara is a local-first PC-game Arabic localization workbench built on **.NET 10
 | `src/Locara.Core` | `net10.0` | Format provider registry, engine detection, container & binary codecs, Arabic shaping/wrapping/font patching, file quality filtering & AI Scout, SQLite store, stateful AI translation bots, installer & Steam trial manager |
 | `src/Locara.Desktop` | `net10.0-windows` | Arabic RTL WPF Localization Studio (Dark/Light `ThemeManager`, 4-stage rail, live 3-Bot Studio, Split Contextual Editor, and Windows Credential Manager) |
 | `src/Locara.Cli` | `net10.0` | Headless CLI (`scan`, `aes-key`, `files`, `clusters`, `scout`, `advice`, `translate`, `build`, `export-xunity`, `install`, `restore`, etc.) |
-| `checks/Locara.Checks` | `net10.0` | xUnit test suite (`114` tests) |
+| `checks/Locara.Checks` | `net10.0` | xUnit test suite (`153` tests) |
 
 Build settings (`Directory.Build.props`, `global.json`, `.github/workflows/ci.yml`):
 - .NET SDK `10.0.404` (`rollForward: latestPatch`), `Nullable=enable`, `TreatWarningsAsErrors=true`, `RestorePackagesWithLockFile=true`.
@@ -34,7 +34,7 @@ Typed access to `settings` goes through `ProjectSettings.cs`. User settings live
 
 - **Engine Codecs:**
   - **Unity (`UnityI2Format.cs`, `UnityBundleFormat.cs`, `UnityAssetsFormat.cs`, `XUnityAutoTranslator.cs`):** Pure-C# UnityFS (preserving the 128 KiB uncompressed block size) and SerializedFile v17–v26 support for I2 Localization, Addressables `.bundle` + `catalog.bin`/`catalog.json` CRC sync, `TextAsset` extraction, and BepInEx `XUnity.AutoTranslator`. `UnityTmpArabicPatcher` injects fallback Arabic fonts into TextMeshPro and neutralizes runtime OpenType `'kern'` features; loose `*_Data/**/*.ttf` fonts receive a bilingual Arabic+Latin fallback when TMP isn't present.
-  - **Unreal Engine 4 & 5 (`UnrealLocresFormat.cs`, `UnrealStringTableFormat.cs`, `UnrealPakCodec.cs`):** Reads and writes `.locres` v0–v3, standalone and split `.uasset`/`.uexp` `UStringTable` assets, and `.pak` v4–v12 archives (None/Zlib/Gzip/LZ4 plus AES-256 ECB index & payload decryption when a key is supplied). Emits `*_Locara_P.pak` patch archives or stream-patches UE5 IoStore `.pak` files (preserving AES index encryption) and injects bilingual `.ufont`/`.ttf` fonts.
+  - **Unreal Engine 4 & 5 (`UnrealLocresFormat.cs`, `UnrealStringTableFormat.cs`, `UnrealPakCodec.cs`):** Reads and writes `.locres` v0–v3, standalone and split `.uasset`/`.uexp` `UStringTable` assets, and `.pak` v4–v12 archives (None/Zlib/Gzip/LZ4/Oodle plus AES-256 ECB index & payload decryption when a key is supplied). Emits `*_Locara_P.pak` patch archives or stream-patches UE5 IoStore `.pak` files (preserving AES index encryption) and injects bilingual `.ufont`/`.ttf` fonts.
   - **Godot (`GodotTranslationFormat.cs`):** Reads and writes Godot 3/4 `RSRC` and compressed `RSCC` (`FastLZ`, `Zlib`, `Zstd`, `Gzip`) `.translation` files (`OptimizedTranslation`/`PHashTranslation` with SMAZ decoding and plain `Translation`) while keeping hash tables intact.
   - **Other Engines & Formats (`Formats.cs`, `CatalogFormats.cs`, `StructuredTextFormats.cs`):** Ren’Py, RPG Maker MV/MZ, GameMaker, JSON/JSONC, CSV/TSV, XML/XLIFF, repeated-key INI, YAML, TOML, `.strings`, Lua, `LocalizationTextFormat` (`loc-txt`), PO/POT (including `.pot -> .po` target delivery), and XLSX.
 

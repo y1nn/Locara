@@ -39,6 +39,11 @@ fonts, and components. Each component remains subject to its respective license.
   License: MIT License
   https://github.com/oleg-st/ZstdSharp
 
+* OodleSharp (0.0.1)
+  Copyright (c) 2026 NotOfficer
+  License: MIT License
+  https://github.com/NotOfficer/OodleSharp
+
 -------------------------------------------------------------------------------
 2. TEST LIBRARIES (Development / Locara.Checks only, not shipped in releases)
 -------------------------------------------------------------------------------

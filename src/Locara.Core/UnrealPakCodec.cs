@@ -163,12 +163,18 @@ internal static class UnrealPakCodec
     public static byte[] ReadEntryBytes(string pakPath, UnrealPakEntryInfo entry, int pakVersion,
         IReadOnlyList<string> compressionMethods, CancellationToken cancellation = default, byte[]? aesKey = null)
     {
+        using var fs = File.OpenRead(pakPath);
+        return ReadEntryBytes(fs, entry, pakVersion, compressionMethods, cancellation, aesKey, maxUncompressedPrefixBytes: 0);
+    }
+
+    internal static byte[] ReadEntryBytes(FileStream fs, UnrealPakEntryInfo entry, int pakVersion,
+        IReadOnlyList<string> compressionMethods, CancellationToken cancellation = default, byte[]? aesKey = null,
+        int maxUncompressedPrefixBytes = 0)
+    {
         if (entry.IsEncrypted && (aesKey == null || aesKey.Length != 32))
             throw new NotSupportedException($"الملف «{entry.Path}» داخل حزمة Unreal مشفّر بمفتاح AES — أدخل مفتاح التشفير (AES-256) ثم أعد الفحص.");
         if (entry.UncompressedSize < 0 || entry.UncompressedSize > 128L * 1024 * 1024)
             throw new InvalidDataException($"حجم الملف «{entry.Path}» يتجاوز الحد المسموح.");
-
-        using var fs = File.OpenRead(pakPath);
         if (entry.Offset < 0 || entry.Offset >= fs.Length)
             throw new InvalidDataException($"موضع الملف «{entry.Path}» خارج حدود حزمة Unreal.");
 
@@ -186,15 +192,21 @@ internal static class UnrealPakCodec
 
         if (methodIdx == 0)
         {
+            long targetRawLen = maxUncompressedPrefixBytes > 0
+                ? Math.Min(uncompressedSize, maxUncompressedPrefixBytes)
+                : uncompressedSize;
             if (isEncrypted)
             {
-                int alignedLen = checked((int)((uncompressedSize + 15) & ~15L));
+                int alignedLen = checked((int)((targetRawLen + 15) & ~15L));
+                long maxAvailAligned = (fs.Length - payloadStart) & ~15L;
+                if (alignedLen > maxAvailAligned)
+                    alignedLen = checked((int)((uncompressedSize + 15) & ~15L));
                 byte[] encRaw = new byte[alignedLen];
                 fs.ReadExactly(encRaw);
                 DecryptAesEcbInPlace(encRaw, aesKey);
-                return encRaw.Length == uncompressedSize ? encRaw : encRaw[..checked((int)uncompressedSize)];
+                return encRaw.Length == targetRawLen ? encRaw : encRaw[..checked((int)targetRawLen)];
             }
-            byte[] raw = new byte[checked((int)uncompressedSize)];
+            byte[] raw = new byte[checked((int)targetRawLen)];
             fs.ReadExactly(raw);
             return raw;
         }
@@ -216,7 +228,10 @@ internal static class UnrealPakCodec
             return DecompressBlock(comp, checked((int)uncompressedSize), methodName, entry.Path);
         }
 
-        using var output = new MemoryStream(checked((int)uncompressedSize));
+        int initialCap = maxUncompressedPrefixBytes > 0
+            ? checked((int)Math.Min(uncompressedSize, Math.Max(maxUncompressedPrefixBytes, 65536)))
+            : checked((int)uncompressedSize);
+        using var output = new MemoryStream(initialCap);
         long remaining = uncompressedSize;
         int blockSizeHint = inline.CompressionBlockSize > 0 ? checked((int)inline.CompressionBlockSize) : 65536;
         foreach (var (blockStart, blockEnd) in inline.Blocks)
@@ -245,6 +260,8 @@ internal static class UnrealPakCodec
             byte[] decompressed = DecompressBlock(comp, expectedOut, methodName, entry.Path);
             output.Write(decompressed);
             remaining -= decompressed.Length;
+            if (maxUncompressedPrefixBytes > 0 && output.Length >= maxUncompressedPrefixBytes)
+                break;
         }
         return output.ToArray();
     }
@@ -890,6 +907,19 @@ internal static class UnrealPakCodec
         if (methodName.Equals("LZ4", StringComparison.OrdinalIgnoreCase))
             return Lz4Block.Decompress(compressed, expectedUncompressed);
 
+        if (methodName.Equals("Oodle", StringComparison.OrdinalIgnoreCase)
+            || methodName.Equals("OodleLZ", StringComparison.OrdinalIgnoreCase))
+        {
+            if (expectedUncompressed < 0)
+                throw new InvalidDataException($"حجم الكتلة غير المضغوطة غير صالح في «{entryPath}».");
+            if (expectedUncompressed == 0)
+                return [];
+            byte[] dst = new byte[expectedUncompressed];
+            if (!OodleSharp.OodleDecompressor.TryDecompress(compressed, dst, out int written) || written != expectedUncompressed)
+                throw new InvalidDataException($"تعذّر فك ضغط Oodle للملف «{entryPath}».");
+            return dst;
+        }
+
         throw new NotSupportedException($"خوارزمية الضغط «{methodName}» للملف «{entryPath}» غير مدعومة حالياً في Locara.");
     }
 
@@ -1121,32 +1151,31 @@ public sealed class UnrealPakFormat : IFormatHandler
     {
         var info = UnrealPakCodec.ReadIndex(pakPath, cancellation, aesKey);
         var selected = SelectPrimaryLocresEntries(info.Entries);
-        var stringTables = SelectStringTableEntries(pakPath, info, cancellation, aesKey, onDiagnostic);
+        var stringTables = ExtractStringTableEntries(pakPath, info, cancellation, aesKey, onDiagnostic);
         if (selected.Count == 0 && stringTables.Count == 0) return [];
 
         var slots = new List<TextSlot>();
         int totalSources = selected.Count + stringTables.Count;
-        foreach (var entry in selected)
+        if (selected.Count > 0)
         {
-            cancellation.ThrowIfCancellationRequested();
-            byte[] locresBytes = UnrealPakCodec.ReadEntryBytes(pakPath, entry, info.Version, info.CompressionMethods, cancellation, aesKey);
-            var extracted = UnrealLocresFormat.Instance.Extract(locresBytes);
-            string fileLabel = Path.GetFileNameWithoutExtension(entry.Path);
-            foreach (var slot in extracted)
+            using var fs = File.OpenRead(pakPath);
+            foreach (var entry in selected)
             {
-                string locator = MakePakLocator(entry.Path, slot.Locator);
-                string context = totalSources > 1 ? $"{fileLabel} · {slot.Context}" : slot.Context;
-                slots.Add(new TextSlot(locator, slot.Source, context));
+                cancellation.ThrowIfCancellationRequested();
+                byte[] locresBytes = UnrealPakCodec.ReadEntryBytes(fs, entry, info.Version, info.CompressionMethods, cancellation, aesKey);
+                var extracted = UnrealLocresFormat.Instance.Extract(locresBytes);
+                string fileLabel = Path.GetFileNameWithoutExtension(entry.Path);
+                foreach (var slot in extracted)
+                {
+                    string locator = MakePakLocator(entry.Path, slot.Locator);
+                    string context = totalSources > 1 ? $"{fileLabel} · {slot.Context}" : slot.Context;
+                    slots.Add(new TextSlot(locator, slot.Source, context));
+                }
             }
         }
-        foreach (var (uassetEntry, uexpEntry) in stringTables)
+        foreach (var (uassetEntry, _, extracted) in stringTables)
         {
             cancellation.ThrowIfCancellationRequested();
-            byte[] uassetBytes = UnrealPakCodec.ReadEntryBytes(pakPath, uassetEntry, info.Version, info.CompressionMethods, cancellation, aesKey);
-            byte[]? uexpBytes = uexpEntry != null
-                ? UnrealPakCodec.ReadEntryBytes(pakPath, uexpEntry, info.Version, info.CompressionMethods, cancellation, aesKey)
-                : null;
-            var extracted = UnrealStringTableFormat.ExtractPair(uassetBytes, uexpBytes);
             string fileLabel = Path.GetFileNameWithoutExtension(uassetEntry.Path);
             foreach (var slot in extracted)
             {
@@ -1437,38 +1466,62 @@ public sealed class UnrealPakFormat : IFormatHandler
         UnrealPakArchiveInfo info,
         CancellationToken cancellation = default,
         byte[]? aesKey = null,
+        Action<Diagnostic>? onDiagnostic = null) =>
+        ExtractStringTableEntries(pakPath, info, cancellation, aesKey, onDiagnostic)
+            .Select(x => (x.Uasset, x.Uexp))
+            .ToList();
+
+    private static List<(UnrealPakEntryInfo Uasset, UnrealPakEntryInfo? Uexp, IReadOnlyList<TextSlot> Slots)> ExtractStringTableEntries(
+        string pakPath,
+        UnrealPakArchiveInfo info,
+        CancellationToken cancellation = default,
+        byte[]? aesKey = null,
         Action<Diagnostic>? onDiagnostic = null)
     {
         var candidateUassets = info.Entries
-            .Where(e => (!e.IsEncrypted || aesKey != null)
-                && e.Path.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase)
-                && !e.Path.StartsWith("Engine/", StringComparison.OrdinalIgnoreCase)
-                && e.UncompressedSize is >= 64 and <= 4 * 1024 * 1024)
+            .Select((entry, index) => (Entry: entry, Index: index))
+            .Where(x => (!x.Entry.IsEncrypted || aesKey != null)
+                && x.Entry.Path.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase)
+                && !x.Entry.Path.StartsWith("Engine/", StringComparison.OrdinalIgnoreCase)
+                && x.Entry.UncompressedSize is >= 64 and <= 4 * 1024 * 1024)
+            .OrderBy(x => x.Entry.Offset)
             .ToList();
         if (candidateUassets.Count == 0) return [];
 
         var byPath = info.Entries.ToDictionary(e => e.Path, StringComparer.OrdinalIgnoreCase);
-        var matched = new List<(UnrealPakEntryInfo Uasset, UnrealPakEntryInfo? Uexp)>();
-        foreach (var ua in candidateUassets)
+        var matched = new List<(int Index, UnrealPakEntryInfo Uasset, UnrealPakEntryInfo? Uexp, IReadOnlyList<TextSlot> Slots)>();
+        using var fs = File.OpenRead(pakPath);
+        foreach (var (ua, idx) in candidateUassets)
         {
             cancellation.ThrowIfCancellationRequested();
             try
             {
-                byte[] uaBytes = UnrealPakCodec.ReadEntryBytes(pakPath, ua, info.Version, info.CompressionMethods, cancellation, aesKey);
+                byte[] prefixBytes = UnrealPakCodec.ReadEntryBytes(fs, ua, info.Version, info.CompressionMethods, cancellation, aesKey, maxUncompressedPrefixBytes: 65536);
+                if (!UnrealStringTableFormat.CouldBeStringTablePrefix(prefixBytes, ua.UncompressedSize))
+                    continue;
+
+                byte[] uaBytes = prefixBytes.LongLength >= ua.UncompressedSize
+                    ? prefixBytes
+                    : UnrealPakCodec.ReadEntryBytes(fs, ua, info.Version, info.CompressionMethods, cancellation, aesKey);
                 if (!UnrealStringTableFormat.IsStringTableHeader(uaBytes)) continue;
+
                 string uexpPath = Path.ChangeExtension(ua.Path, ".uexp").Replace('\\', '/');
                 byPath.TryGetValue(uexpPath, out var uexpEntry);
                 byte[]? uexpBytes = uexpEntry != null
-                    ? UnrealPakCodec.ReadEntryBytes(pakPath, uexpEntry, info.Version, info.CompressionMethods, cancellation, aesKey)
+                    ? UnrealPakCodec.ReadEntryBytes(fs, uexpEntry, info.Version, info.CompressionMethods, cancellation, aesKey)
                     : null;
-                if (UnrealStringTableFormat.ExtractPair(uaBytes, uexpBytes).Count > 0)
-                    matched.Add((ua, uexpEntry));
+                var slots = UnrealStringTableFormat.ExtractPair(uaBytes, uexpBytes);
+                if (slots.Count > 0)
+                    matched.Add((idx, ua, uexpEntry, slots));
             }
             catch (Exception ex)
             {
                 onDiagnostic?.Invoke(new($"{Path.GetFileName(pakPath)}:{ua.Path}", ex.Message));
             }
         }
-        return matched;
+        return matched
+            .OrderBy(x => x.Index)
+            .Select(x => (x.Uasset, x.Uexp, x.Slots))
+            .ToList();
     }
 }
