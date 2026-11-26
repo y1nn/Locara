@@ -298,9 +298,11 @@ public partial class MainWindow
         if (ProviderSummary == null || Provider == null || Provider.SelectedItem == null) return;
         string providerName = Selected(Provider);
         string activeName = savedProfiles.Count > 0 ? ActiveProfile.Name : "الافتراضي";
-        string baseSummary = string.IsNullOrWhiteSpace(Model.Text)
-            ? $"الاتصال: {activeName} ({providerName}) — اختر نموذجاً من «إعداد المزوّد والـ API»"
-            : $"الاتصال: {activeName} ({providerName})  ·  النموذج: {Model.Text.Trim()}";
+        string baseSummary = string.IsNullOrWhiteSpace(Model.Text) && providerName != "azure"
+            ? $"⚠ إعداد الـ API: {activeName} ({providerName})"
+            : $"{activeName} · {Model.Text.Trim()}";
+        if (NavSettings != null)
+            NavSettings.Tag = string.IsNullOrWhiteSpace(Model.Text) && providerName != "azure" ? "!" : "";
 
         var overrides = new List<string>();
         string trP = TranslatorProfileInput?.SelectedValue as string ?? "";
@@ -342,7 +344,7 @@ public partial class MainWindow
             string targetBatch = (settings.BatchSize > 0 ? settings.BatchSize : 30).ToString();
             BatchSizeChoice.SelectedValue = BatchSizeChoice.Items.OfType<ComboBoxItem>().Any(i => Equals(i.Tag, targetBatch))
                 ? targetBatch : "30";
-            SpeedMode.SelectedValue = settings.FastMode ? "fast" : "team";
+            SpeedMode.SelectedValue = settings.FastMode ? "fast" : settings.SmartReview ? "smart" : "team";
 
             var roleChoices = BuildRoleProfileChoices("الافتراضي (الاتصال النشط)");
             SetRoleRoutingUi(TranslatorProfileInput, TranslatorModelInput, settings.TranslatorProfile, settings.TranslatorModel, roleChoices);
@@ -384,6 +386,7 @@ public partial class MainWindow
     private int SelectedWorkers() => int.TryParse(WorkersCount.SelectedValue as string, out int n) ? Math.Clamp(n, 1, 16) : 4;
     private int SelectedBatchSize() => int.TryParse(BatchSizeChoice.SelectedValue as string, out int n) ? Math.Clamp(n, 1, 80) : 30;
     private bool SelectedFastMode() => (SpeedMode.SelectedValue as string) == "fast";
+    private bool SelectedSmartMode() => (SpeedMode.SelectedValue as string) is null or "smart";
 
     private Dictionary<int, AgentTarget>? ReadWorkerTargets()
     {
@@ -413,17 +416,12 @@ public partial class MainWindow
         SupervisorProfile: (SupervisorProfileInput.SelectedValue as string ?? "").Trim(),
         TranslatorProfile: (TranslatorProfileInput.SelectedValue as string ?? "").Trim(),
         ReviewerProfile: (ReviewerProfileInput.SelectedValue as string ?? "").Trim(),
-        WorkerTargets: ReadWorkerTargets());
+        WorkerTargets: ReadWorkerTargets(),
+        SmartReview: SelectedSmartMode() && !SelectedFastMode() && !reviewDrafts);
 
-    private void ToggleConnectionPanel(object sender, RoutedEventArgs e)
-    {
-        ConnectionPanel.IsExpanded = !ConnectionPanel.IsExpanded;
-    }
+    private void ToggleConnectionPanel(object sender, RoutedEventArgs e) => OpenConnectionSettings();
 
-    private void ToggleRoutingPanel(object sender, RoutedEventArgs e)
-    {
-        RoutingPanel.IsExpanded = !RoutingPanel.IsExpanded;
-    }
+    private void ToggleRoutingPanel(object sender, RoutedEventArgs e) => OpenRoutingSettings();
 
     private void SaveTeamRoleSettings(object sender, RoutedEventArgs e)
     {
@@ -491,12 +489,18 @@ public partial class MainWindow
         var settings = ReadInlineTeamSettings(reviewDrafts: false);
         string prompts = string.Join("\n\n", new[] { ("المشرف", "supervisor"), ("المترجم", "translator"), ("المراجع", "reviewer") }
             .Select(role => role.Item1 + "\n" + TranslationTeam.PromptPreview(role.Item2, settings)));
-        new Window
+        var win = new Window
         {
-            Owner = this, Title = "تعليمات النظام الكاملة", Width = 720, Height = 520,
+            Owner = this, Title = "تعليمات النظام الكاملة", Width = 740, Height = 540,
             FlowDirection = FlowDirection.RightToLeft, WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new TextBox { Text = prompts, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }
-        }.ShowDialog();
+            Content = new Border
+            {
+                Margin = new Thickness(18),
+                Child = new TextBox { Text = prompts, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }
+            }
+        };
+        ThemeManager.AttachWindow(win);
+        win.ShowDialog();
     }
 
     private async void EstimateTeamBudget(object sender, RoutedEventArgs e)
@@ -509,6 +513,8 @@ public partial class MainWindow
             CharacterBudget.Text = estimate.Characters.ToString();
             RequestBudget.Text = estimate.Requests.ToString();
             UnlimitedBudget.IsChecked = false;
+            UpdateBudgetCapBadge();
+            PersistProfilesFile();
             Status.Text = "حُسبت الحدود التقديرية للاستئناف. يمكنك تعديلها أو تفعيل «بلا سقف».";
         }
         catch (Exception error) { if (path == projectPath) Status.Text = error.Message; }
@@ -519,7 +525,6 @@ public partial class MainWindow
     private async Task ReviewDraftsWithAiCore()
     {
         TranslationMode.SelectedValue = "review-drafts";
-        SpeedMode.SelectedValue = "team";
         AutoApproveReviewed.IsChecked = true;
         Tabs.SelectedItem = TranslationPage;
         await StartUnifiedTranslationCore();
@@ -555,8 +560,7 @@ public partial class MainWindow
         try { options = ReadProvider(); }
         catch (Exception error)
         {
-            Tabs.SelectedItem = TranslationPage;
-            ConnectionPanel.IsExpanded = true;
+            OpenConnectionSettings();
             Status.Text = error.Message;
             return;
         }
@@ -599,8 +603,7 @@ public partial class MainWindow
         try { options = ReadProvider(); }
         catch (Exception error)
         {
-            Tabs.SelectedItem = TranslationPage;
-            ConnectionPanel.IsExpanded = true;
+            OpenConnectionSettings();
             Status.Text = error.Message;
             return;
         }
@@ -628,20 +631,30 @@ public partial class MainWindow
         liveAgents.Clear();
         agentByWorker.Clear();
         liveEvents.Clear();
+        liveSamples.Clear();
+        LiveSamplesEmptyText.Visibility = Visibility.Visible;
+        if (NavTranslation != null) NavTranslation.Tag = "نشط ●";
+        if (LoreBotBadge != null)
+        {
+            LoreBotBadge.Text = !fastMode && plan.UseSupervisor ? "يحلّل الآن ●" : "مسرد محفوظ";
+            LoreBotBadge.SetResourceReference(TextBlock.ForegroundProperty, "AccentIndicator");
+        }
 
         if (!fastMode && plan.UseSupervisor)
         {
             var supTarget = TranslationTeam.ResolveAssignment(activeSettings, options, profiles, 0, "supervisor");
             var sup = new AgentRow
             {
-                WorkerId = 0, AgentName = "المشرف", Role = "تخطيط وتوزيع",
+                WorkerId = 0, AgentName = "بوت الكشّاف", Role = "بناء العالم والمسرد",
                 ModelLabel = FormatModelBadge(supTarget.Profile, supTarget.Model),
-                Stage = "جاهز", Detail = "ينتظر بدء التخطيط"
+                Stage = "جاهز", Detail = "ينتظر تحليل مصطلحات اللعبة…"
             };
             liveAgents.Add(sup);
             agentByWorker[0] = sup;
         }
-        string defaultRole = plan.Settings.ReviewDrafts ? "مراجع AI" : fastMode ? "مترجم سريع" : "مترجم + مراجع";
+        string defaultRole = plan.Settings.ReviewDrafts ? "مدقق مسودات"
+            : fastMode ? "بوت مترجم متسلسل"
+            : activeSettings.SmartReview ? "بوت مشهدي + مدقق ذكي" : "مترجم + مدقق شامل";
         string initialRoleKey = plan.Settings.ReviewDrafts ? "reviewer" : "translator";
         for (int i = 1; i <= workers; i++)
         {
@@ -650,7 +663,7 @@ public partial class MainWindow
             {
                 WorkerId = i, AgentName = $"وكيل #{i}", Role = defaultRole,
                 ModelLabel = FormatModelBadge(target.Profile, target.Model),
-                Stage = "جاهز", Detail = "ينتظر سحب أول دفعة…"
+                Stage = "جاهز", Detail = "ينتظر استلام مسار مشهدي متصل…"
             };
             liveAgents.Add(row);
             agentByWorker[i] = row;
@@ -658,8 +671,11 @@ public partial class MainWindow
 
         LiveMonitorTitle.Text = plan.Settings.ReviewDrafts
             ? "الوكلاء يراجعون المسودات الآن…"
-            : fastMode ? "المترجمون المتوازون يعملون الآن (وضع سريع)…" : "فريق الترجمة والمراجعة يعمل الآن…";
-        LiveModeBadge.Text = plan.Settings.ReviewDrafts ? "مراجعة مسودات" : fastMode ? "وضع سريع" : "فريق كامل";
+            : fastMode ? "البوتات تعمل الآن (وضع سريع متسلسل)…"
+            : activeSettings.SmartReview ? "البوتات الذكية المترابطة تعمل الآن…" : "فريق الترجمة والمراجعة الشاملة يعمل الآن…";
+        LiveModeBadge.Text = plan.Settings.ReviewDrafts ? "مراجعة مسودات"
+            : fastMode ? "وضع سريع"
+            : activeSettings.SmartReview ? "بوتات ذكية مترابطة" : "مراجعة شاملة";
         LiveActiveAgentsText.Text = $"{workers} / {workers}";
         LiveProgressBar.Value = 0;
         LiveProgressText.Text = $"0 / {plan.Batches.Length:N0} دفعة (0.0%)";
@@ -720,7 +736,8 @@ public partial class MainWindow
             {
                 using var project = new ProjectStore(path);
                 var team = new TranslationTeam(project);
-                if (saveSettings) team.Settings = overrideSettings with { ReviewDrafts = false };
+                if (saveSettings && !plan.Settings.ReviewDrafts)
+                    team.Settings = overrideSettings with { ReviewDrafts = false };
                 TeamProgress status = await team.Run(plan, options, progress, cancellation,
                     approveReviewed: approveReviewed, overrideWorkers: workers, overrideFastMode: overrideFastMode,
                     profiles: profiles, overrideSettings: overrideSettings);
@@ -732,7 +749,7 @@ public partial class MainWindow
                     if (preview.ChangedFiles.Count > 0)
                     {
                         output = service.Build(Path.Combine(path, "outputs", "team-" + Guid.NewGuid().ToString("N")),
-                            password: password, cancellation: cancellation, reviewed: preview).Directory;
+                            password: password, cancellation: cancellation, reviewed: preview, overlayOnly: true).Directory;
                         project.LastOutput = output;
                     }
                 }
@@ -744,8 +761,8 @@ public partial class MainWindow
                 ? "اكتمل التشغيل بنجاح"
                 : "توقّف التشغيل مع حفظ جميع الدفعات المكتملة";
             LiveActiveAgentsText.Text = $"0 / {workers}";
-            LiveNotesCountText.Text = $"ملاحظات: {result.notes}";
-            TeamNotesButton.Content = result.notes > 0 ? $"ملاحظات الفريق ({result.notes})" : "ملاحظات الفريق";
+            LiveNotesCountText.Text = $"ملاحظات التدقيق: {result.notes}";
+            TeamNotesButton.Content = result.notes > 0 ? $"ملاحظات المدقق ({result.notes})" : "ملاحظات المدقق";
             TeamStatus.Text = FormatTeamStatus(result.status) + (result.notes > 0 ? $" · ملاحظات {result.notes}" : "");
             Status.Text = result.status.Completed >= result.status.Total
                 ? $"اكتمل التشغيل — حُفظت {result.status.Saved:N0} ترجمة."
@@ -755,6 +772,7 @@ public partial class MainWindow
                 packagePath = result.output;
                 BuildLog.Text = "معاينة الفريق جاهزة\n" + result.output;
             }
+            _ = ReloadLoreAndGlossariesAsync();
         }, keepTranslationInteractive: true);
 
         if (!finishedNormally && IsLoaded && projectPath == path)
@@ -766,6 +784,7 @@ public partial class MainWindow
                 if (agent.Stage is not ("انتهى" or "مكتمل"))
                     agent.Stage = "متوقف";
             }
+            _ = ReloadLoreAndGlossariesAsync();
         }
     }
 
@@ -827,6 +846,15 @@ public partial class MainWindow
 
             int activeNow = liveAgents.Count(a => a.Stage is not ("انتهى" or "جاهز"));
             LiveActiveAgentsText.Text = $"{activeNow} / {workers}";
+            if (act.WorkerId == 0 && LoreBotBadge != null)
+            {
+                bool scoutDone = act.Stage is "انتهى" or "مكتمل";
+                LoreBotBadge.Text = scoutDone ? "جاهز ✓" : act.Stage;
+                LoreBotBadge.SetResourceReference(TextBlock.ForegroundProperty, scoutDone ? "SuccessFg" : "AccentIndicator");
+                if (LoreBotDetail != null) LoreBotDetail.Text = act.Detail;
+                if (scoutDone) _ = ReloadLoreAndGlossariesAsync();
+            }
+            AppendLiveSample(act.Section, act.SampleSource, act.SampleTarget);
             string modelTag = string.IsNullOrWhiteSpace(row.ModelLabel) ? "" : $" [{row.ModelLabel}]";
             AppendLiveEvent($"{act.Role}{modelTag} ← {act.Detail}");
         }
@@ -877,18 +905,14 @@ public partial class MainWindow
         LiveActiveAgentsText.Text = "0";
         LiveModeBadge.Text = plan == null ? "—"
             : plan.Settings.ReviewDrafts ? "مراجعة مسودات"
-            : plan.Settings.FastMode ? "وضع سريع" : "فريق كامل";
+            : plan.Settings.FastMode ? "وضع سريع"
+            : plan.Settings.SmartReview ? "بوتات ذكية مترابطة" : "مراجعة شاملة";
         TeamNotesButton.Content = notesCount > 0 ? $"ملاحظات الفريق ({notesCount})" : "ملاحظات الفريق";
 
         bool canResume = progress.Completed < progress.Total;
         ResumeTeamPrimary.Visibility = canResume ? Visibility.Visible : Visibility.Collapsed;
-        StartTranslationPrimary.Content = canResume ? "بدء تشغيل جديد" : "ابدأ الترجمة الآن";
-        StartTranslationPrimary.Background = canResume
-            ? (System.Windows.Media.Brush)FindResource("AccentSoft")
-            : (System.Windows.Media.Brush)FindResource("Accent");
-        StartTranslationPrimary.Foreground = canResume
-            ? (System.Windows.Media.Brush)FindResource("Ink")
-            : System.Windows.Media.Brushes.White;
+        StartTranslationPrimary.Content = canResume ? "بدء جلسة جديدة" : "تشغيل البوتات الآن";
+        StartTranslationPrimary.Style = (Style)FindResource(canResume ? typeof(Button) : "PrimaryButtonStyle");
     }
 
     private static string FormatTeamStatus(TeamProgress value)

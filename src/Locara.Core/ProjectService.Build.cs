@@ -132,6 +132,8 @@ public sealed partial class ProjectService
         string gettextPoTarget = settings.GettextPoTarget;
         var gettextPotDeliveries = new List<(string PotPath, Dictionary<string, string> EffectiveReplacements, byte[] RewrittenPotBytes)>();
         var companionUexpDeliveries = new List<(string UexpRelPath, string BeforeHash, byte[] NewBytes)>();
+        int seenScanned = 0;
+        var matchedTranslatedPaths = new HashSet<string>(StringComparer.Ordinal);
         foreach (var entry in index.Entries)
         {
             cancellation.ThrowIfCancellationRequested();
@@ -140,7 +142,10 @@ public sealed partial class ProjectService
             string key = source.Key(entry.Path);
             if (!scanned.ContainsKey(key) && skippedScanErrorPaths.Contains(key))
                 continue;
+            if (scanned.ContainsKey(key)) seenScanned++;
             var selected = units[key];
+            bool hasSelectedUnits = selected.Any();
+            if (hasSelectedUnits) matchedTranslatedPaths.Add(key);
             bool displaySupported = false;
             if (format is StarTruckerCatalog && selected.Any(unit => ArabicTextEngine.HasArabic(unit.Target)))
             {
@@ -152,6 +157,7 @@ public sealed partial class ProjectService
                     : "تصدير ملف اللغة فقط. " + unsupported;
             }
             var replacements = new Dictionary<string, string>(StringComparer.Ordinal);
+            var sourceByLocator = new Dictionary<string, string>(StringComparer.Ordinal);
             bool shapedLabels = false;
             foreach (var unit in selected)
             {
@@ -160,6 +166,7 @@ public sealed partial class ProjectService
                     blocked++;
                     continue;
                 }
+                sourceByLocator[unit.Locator] = unit.Source;
                 if (!displaySupported || !ArabicTextEngine.HasArabic(unit.Target))
                     replacements.Add(unit.Locator, unit.Target);
                 else if (StarTruckerDisplay.Supports(unit))
@@ -170,6 +177,9 @@ public sealed partial class ProjectService
                 else blocked++;
             }
             if (replacements.Count > 0) resources.Add(new(key, replacements.Count));
+
+            if (!source.IsArchive && replacements.Count == 0 && !hasSelectedUnits)
+                continue;
 
             if (format is UnityI2Format && !source.IsArchive)
             {
@@ -194,7 +204,9 @@ public sealed partial class ProjectService
                 else
                 {
                     changes.Add(new(entry.Path, beforeI2, beforeI2 + ":pending"));
-                    if (hasArabicI2) unityTmpPatchedInResource = true;
+                    if (hasArabicI2 && standaloneUnityTmpHost != null
+                        && entry.Path.Equals(standaloneUnityTmpHost.Path, StringComparison.OrdinalIgnoreCase))
+                        unityTmpPatchedInResource = true;
                 }
                 if (hasArabicI2) i2ArabicUpdated = true;
                 continue;
@@ -215,7 +227,7 @@ public sealed partial class ProjectService
                     string stagedPath = reserveStreamedRewrite(entry);
                     UnityAssetsFormat.ApplyToFile(
                         Path.Combine(source.Path, entry.Path), stagedPath, replacements, displayFont, unityDisplay,
-                        applyShaping: standaloneUnityTmpHost != null, cancellation, out bool patchedAssetTmp);
+                        applyShaping: unityDisplay.ShapeArabic, cancellation, out bool patchedAssetTmp);
                     if (patchedAssetTmp) unityTmpPatchedInResource = true;
                     string afterAssets = PackageInstaller.FileHash(stagedPath, cancellation);
                     if (beforeAssets == afterAssets) continue;
@@ -312,7 +324,7 @@ public sealed partial class ProjectService
             if (original == null) continue;
             bool hasUnityFontTarget = standaloneUnityTmpHost != null || looseUnityFonts.Count > 0;
             bool shapeBundleOrLooseUnity = profile.Name == "unity" && !source.IsArchive
-                && hasUnityFontTarget && !hasI2InIndex && unityDisplay.ShapeArabic
+                && !hasI2InIndex && unityDisplay.ShapeArabic
                 && replacements.Values.Any(ArabicTextEngine.HasArabic);
             if (profile.Name == "unity" && !source.IsArchive && replacements.Values.Any(ArabicTextEngine.HasArabic))
                 anyNonI2UnityArabic = true;
@@ -325,9 +337,38 @@ public sealed partial class ProjectService
             }
             else if (shapeBundleOrLooseUnity && format is not StarTruckerCatalog)
             {
+                bool conservativeSingleLineWrap = !hasUnityFontTarget
+                    && unityDisplay.WrapMode.Equals("auto", StringComparison.OrdinalIgnoreCase);
+                HashSet<string>? locTxtQuoted = format is LocalizationTextFormat
+                    ? LocalizationTextFormat.GetQuotedLocators(original)
+                    : null;
                 var shapedMap = new Dictionary<string, string>(replacements.Count, StringComparer.Ordinal);
                 foreach (var (loc, val) in replacements)
-                    shapedMap[loc] = unityDisplay.TransformArabic(val);
+                {
+                    bool singleLineFormatOnly = format is IniFormat
+                        || (locTxtQuoted != null && !locTxtQuoted.Contains(loc));
+                    if (!ArabicTextEngine.HasArabic(val))
+                    {
+                        shapedMap[loc] = val;
+                    }
+                    else if (singleLineFormatOnly)
+                    {
+                        shapedMap[loc] = ArabicTextEngine.Shape(val);
+                    }
+                    else if (conservativeSingleLineWrap)
+                    {
+                        string srcText = sourceByLocator.GetValueOrDefault(loc, "");
+                        int visibleLen = Tokens.ReplaceTokens(val, _ => "").Length;
+                        bool multiLineOrLong = srcText.Contains('\n') || val.Contains('\n') || visibleLen > 65;
+                        shapedMap[loc] = multiLineOrLong
+                            ? ArabicTextEngine.WrapAndShape(val, 48)
+                            : ArabicTextEngine.Shape(val);
+                    }
+                    else
+                    {
+                        shapedMap[loc] = unityDisplay.TransformArabic(val);
+                    }
+                }
                 effectiveReplacements = shapedMap;
                 rewritten = Formats.Apply(original, format, shapedMap, settings.GetExtractionRule(key));
             }
@@ -362,7 +403,9 @@ public sealed partial class ProjectService
                     checked((uint)rewritten.Length)));
             }
         }
-        if (expected.Count != scanned.Count || expected.Count == 0)
+        bool archiveCountMismatch = source.IsArchive && expected.Count != scanned.Count;
+        bool missingTranslatedResource = units.Any(g => !matchedTranslatedPaths.Contains(g.Key));
+        if (scanned.Count == 0 || seenScanned == 0 || archiveCountMismatch || missingTranslatedResource)
             throw new InvalidOperationException("تغيرت قائمة الموارد أو لم يُعثر على موارد مدعومة. أعد الفحص.");
 
         foreach (var (uexpRel, beforeUexp, newUexp) in companionUexpDeliveries)
@@ -396,11 +439,15 @@ public sealed partial class ProjectService
                 {
                     var siblingEntry = index.Entries.FirstOrDefault(e =>
                         e.Path.Equals(gettextPoTarget, StringComparison.OrdinalIgnoreCase)
-                        || source.Key(e.Path).Equals(gettextPoTarget, StringComparison.OrdinalIgnoreCase));
-                    if (siblingEntry != null && !changes.Any(c => c.Path.Equals(siblingEntry.Path, StringComparison.OrdinalIgnoreCase)))
+                        || source.Key(e.Path).Equals(gettextPoTarget, StringComparison.OrdinalIgnoreCase))
+                        ?? throw new InvalidOperationException("تغيرت قائمة الموارد أو لم يُعثر على موارد مدعومة. أعد الفحص.");
+                    if (!changes.Any(c => c.Path.Equals(siblingEntry.Path, StringComparison.OrdinalIgnoreCase)))
                     {
                         byte[] siblingOrig = siblingEntry.Read(cancellation);
                         string siblingBefore = Identity.Hash(siblingOrig);
+                        string siblingKey = source.Key(siblingEntry.Path);
+                        if (scanned.TryGetValue(siblingKey, out string? scannedSibling) && scannedSibling != siblingBefore)
+                            throw new InvalidOperationException("تغير المورد منذ الفحص — " + siblingKey);
                         byte[] siblingRewritten = poFormat.Apply(siblingOrig, effReplacements, preserveLanguage: true);
                         string siblingAfter = Identity.Hash(siblingRewritten);
                         if (siblingBefore != siblingAfter)
@@ -547,7 +594,9 @@ public sealed partial class ProjectService
         if (i2ArabicUpdated)
         {
             string shapingDesc = unityDisplay.ShapeArabic ? $"تشكيل العربية ({unityDisplay.WrapLabel})" : "عربي منطقي (RTL أصلي)";
-            string i2Note = $"تم تحديث I2 Localization وتجهيز العرض ({shapingDesc}) وحقن الخط الاحتياطي (TextMeshPro) · الخط: {displayFont.DisplayName} · الحجم: {unityDisplay.ScaleLabel}";
+            string i2Note = (unityTmpPatchedInResource || unityTmpStandalonePatched)
+                ? $"تم تحديث I2 Localization وتجهيز العرض ({shapingDesc}) وحقن الخط الاحتياطي (TextMeshPro) · الخط: {displayFont.DisplayName} · الحجم: {unityDisplay.ScaleLabel}"
+                : $"تم تحديث I2 Localization وتجهيز العرض ({shapingDesc}).";
             notice = notice.Length == 0 ? i2Note : notice + "\n" + i2Note;
         }
         else if (unityAssetsArabicUpdated || unityTmpStandalonePatched)
@@ -563,6 +612,12 @@ public sealed partial class ProjectService
             string shapingDesc = unityDisplay.ShapeArabic ? $"تشكيل العربية ({unityDisplay.WrapLabel})" : "عربي منطقي (RTL أصلي)";
             string fontNote = $"تم حقن الخط العربي+اللاتيني الثنائي ({looseFontChoice.DisplayName}) في خطوط اللعبة ({string.Join("، ", patchedLooseFontNames)}) وتجهيز العرض ({shapingDesc}).";
             notice = notice.Length == 0 ? fontNote : notice + "\n" + fontNote;
+        }
+        else if (anyNonI2UnityArabic)
+        {
+            string shapingDesc = unityDisplay.ShapeArabic ? $"تشكيل العربية ({unityDisplay.WrapLabel})" : "عربي منطقي (RTL أصلي)";
+            string dynNote = $"تم تجهيز العرض العربي ({shapingDesc}) لخطوط Unity.";
+            notice = notice.Length == 0 ? dynNote : notice + "\n" + dynNote;
         }
 
         string package = source.IsArchive ? source.OutputPath : "";

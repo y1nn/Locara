@@ -126,11 +126,10 @@ public partial class MainWindow
             ? $"يوجد {unknownPriceModels} نموذج بلا سعر — حدّده من الجدول"
             : "تقديري حسب أسعار كل نموذج (قابل للتعديل)";
 
-        OverviewUsageCard.Visibility = totalReqs > 0 || totalTokens > 0 ? Visibility.Visible : Visibility.Collapsed;
         OverviewTotalTokens.Text = totalTokens.ToString("N0");
         OverviewTokensBreakdown.Text = breakdown;
         OverviewTotalCost.Text = costDisplay;
-        OverviewTotalRequests.Text = $"{totalReqs:N0} طلب عبر {entries.Count} نموذج";
+        OverviewTotalRequests.Text = totalReqs > 0 ? $"{totalReqs:N0} طلب عبر {entries.Count} نموذج" : "0 طلب مسجّل";
 
         UsageSummaryTokens.Text = totalTokens.ToString("N0");
         UsageSummaryBreakdown.Text = breakdown;
@@ -156,12 +155,9 @@ public partial class MainWindow
             PopulatePriceEditor(row);
     }
 
-    private void OpenUsagePanel(object sender, RoutedEventArgs e)
-    {
-        Tabs.SelectedItem = TranslationPage;
-        UsageCostPanel.IsExpanded = true;
-        UsageCostPanel.BringIntoView();
-    }
+    private void OpenUsagePanel(object sender, RoutedEventArgs e) => OpenUsageSettings();
+
+    private void OpenUsagePanel(object sender, System.Windows.Input.MouseButtonEventArgs e) => OpenUsageSettings();
 
     private static bool TryParseUsd(string text, out double value)
     {

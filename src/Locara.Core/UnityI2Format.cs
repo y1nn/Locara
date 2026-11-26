@@ -950,7 +950,8 @@ public sealed class UnityI2Format : IFormatHandler
                     && translations.TryGetValue(locator, out string? translated)
                     && translated != term.Languages[langIdx])
                 {
-                    string finalValue = arabicFontPatched && opts.ShapeArabic && ArabicTextEngine.HasArabic(translated)
+                    bool shouldShapeI2 = (arabicFontPatched || displayOptions != null) && opts.ShapeArabic;
+                    string finalValue = shouldShapeI2 && ArabicTextEngine.HasArabic(translated)
                         ? ArabicTextEngine.WrapAndShape(translated, opts.MaxLineChars)
                         : translated;
                     var langs = term.Languages.ToArray();

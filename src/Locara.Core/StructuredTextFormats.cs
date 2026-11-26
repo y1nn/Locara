@@ -1094,6 +1094,30 @@ public sealed class LocalizationTextFormat : IFormatHandler
         "todo", "authors", "contributing", "copying", "patents", "steam_appid", "version"
     };
 
+    private static readonly HashSet<string> TechnicalMetadataKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "systemlanguage", "system_language",
+        "languagecode", "language_code", "langcode", "lang_code",
+        "localecode", "locale_code", "isocode", "iso_code",
+        "culturecode", "culture_code", "culturename", "culture_name",
+        "bcp47", "ietftag", "charset", "encoding",
+        "textdirection", "text_direction", "isrtl", "is_rtl",
+        "fileversion", "file_version", "formatversion", "format_version"
+    };
+
+    private static bool IsTechnicalMetadataKey(string key) =>
+        TechnicalMetadataKeys.Contains(key)
+        || (key.Contains('-') && TechnicalMetadataKeys.Contains(key.Replace('-', '_')));
+
+    internal static HashSet<string> GetQuotedLocators(byte[] bytes)
+    {
+        if (bytes.Length == 0 || LooksBinary(bytes)) return [];
+        var (text, _, _) = TextEncodingHelper.DecodeText(bytes);
+        var (layout, entries) = ParseEntries(SplitLines(text));
+        if (layout != LayoutKind.KeyValue) return [];
+        return entries.Where(e => e.IsQuoted).Select(e => e.Locator).ToHashSet(StringComparer.Ordinal);
+    }
+
     private enum LayoutKind { KeyValue, TabSeparated, LineByLine }
 
     private sealed record LinePart(string Content, string NewLine);
@@ -1351,7 +1375,8 @@ public sealed class LocalizationTextFormat : IFormatHandler
                     lastComment = "";
                     continue;
                 }
-                if (!TrySplitKeyValue(raw, out string key, out string prefix, out string rawValue))
+                if (!TrySplitKeyValue(raw, out string key, out string prefix, out string rawValue)
+                    || IsTechnicalMetadataKey(key))
                 {
                     lastComment = "";
                     continue;
@@ -1377,7 +1402,7 @@ public sealed class LocalizationTextFormat : IFormatHandler
                 string key = raw[..tab].Trim();
                 string valRaw = raw[(tab + 1)..];
                 string value = valRaw.TrimEnd();
-                if (key.Length == 0 || string.IsNullOrWhiteSpace(value)) { lastComment = ""; continue; }
+                if (key.Length == 0 || IsTechnicalMetadataKey(key) || string.IsNullOrWhiteSpace(value)) { lastComment = ""; continue; }
                 string suffix = valRaw[value.Length..];
                 string locator = MakeUniqueLocator(key, i);
                 string context = lastComment.Length > 0 ? lastComment : key;

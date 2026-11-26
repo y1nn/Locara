@@ -16,10 +16,11 @@ internal sealed class TeamSetupWindow : Window
         Height = 645;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         FlowDirection = FlowDirection.RightToLeft;
+        ThemeManager.AttachWindow(this);
 
         var layout = new DockPanel { Margin = new Thickness(20) };
-        var actions = new StackPanel { Orientation = Orientation.Horizontal };
-        var start = new Button { Content = "ابدأ التعريب", IsDefault = true };
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0) };
+        var start = new Button { Content = "ابدأ التعريب", IsDefault = true, Style = (Style)Application.Current.FindResource("PrimaryButtonStyle") };
         actions.Children.Add(start);
         actions.Children.Add(new Button { Content = "إلغاء", IsCancel = true });
         DockPanel.SetDock(actions, Dock.Bottom);
@@ -52,7 +53,7 @@ internal sealed class TeamSetupWindow : Window
         reset.Click += (_, _) => { supervisor.Clear(); translator.Clear(); reviewer.Clear(); };
         advanced.Children.Add(reset);
         content.Children.Add(new Expander { Header = "الأدوار والنماذج", Content = advanced, Margin = new Thickness(0, 10, 0, 0) });
-        var issue = new TextBlock { Foreground = Brushes.DarkRed, TextWrapping = TextWrapping.Wrap };
+        var issue = new TextBlock { Foreground = Application.Current.Resources["DangerFg"] as Brush ?? Brushes.IndianRed, TextWrapping = TextWrapping.Wrap };
         content.Children.Add(issue);
         var preview = new Button { Content = "عرض تعليمات الأدوار", HorizontalAlignment = HorizontalAlignment.Right };
         content.Children.Add(preview);

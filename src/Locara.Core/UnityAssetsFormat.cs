@@ -272,7 +272,11 @@ public sealed partial class UnityAssetsFormat : IFormatHandler
 
             var effectiveMap = new Dictionary<string, string>(edit.Inner.Count, StringComparer.Ordinal);
             foreach (var (k, v) in edit.Inner)
-                effectiveMap[k] = shouldShape ? opts.TransformArabic(v) : v;
+            {
+                effectiveMap[k] = shouldShape && ArabicTextEngine.HasArabic(v)
+                    ? (edit.Kind == "ini" ? ArabicTextEngine.Shape(v) : opts.TransformArabic(v))
+                    : v;
+            }
 
             string updatedText = ApplyEmbeddedTranslations(edit.Kind, ta.Text, effectiveMap);
             if (updatedText != ta.Text)

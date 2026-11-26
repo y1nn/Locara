@@ -58,8 +58,14 @@ public static partial class FieldSemantics
         "width", "height", "depth", "offset", "padding", "margin", "bounds", "rect",
         "order", "sortorder", "priority", "weight", "chance", "probability", "rate",
         "speed", "duration", "cooldown", "delay", "range", "radius", "damage", "health",
-        "cost", "price", "formula", "regex", "pattern", "format", "encoding",
+        "cost", "price", "formula", "regex", "pattern", "format", "encoding", "charset",
         "locale", "lang", "language", "culture", "region", "currency",
+        "systemlanguage", "system_language", "langcode", "lang_code", "languagecode", "language_code",
+        "localecode", "locale_code", "isocode", "iso_code", "culturecode", "culture_code",
+        "culturename", "culture_name", "textdirection", "text_direction", "fileversion", "formatversion",
+        "countrycode", "country_code", "regioncode", "region_code", "currencycode", "currency_code",
+        "errorcode", "error_code", "statuscode", "status_code", "colorcode", "color_code",
+        "hashcode", "shortcode", "unicode", "bbcode", "netcode",
         "parent", "parentid", "child", "children", "ref", "reference", "targetid", "sourceid",
         "table", "sheet", "column", "row", "index", "slot", "group", "groupid",
         "component", "components", "behavior", "behaviour", "trait", "traits",
@@ -72,7 +78,8 @@ public static partial class FieldSemantics
     [
         "_id", "id", "_key", "_ref", "_path", "_file", "_prefab", "_sprite", "_icon",
         "_shader", "_sound", "_audio", "_anim", "_tag", "_type", "_mode", "_style",
-        "_layout", "_color", "_colour", "_guid", "_uuid", "_hash", "_url", "_uri"
+        "_layout", "_color", "_colour", "_guid", "_uuid", "_hash", "_url", "_uri",
+        "_code", "_locale", "_lang", "_charset", "_encoding"
     ];
 
     private static readonly string[] HumanSuffixes =
@@ -106,16 +113,29 @@ public static partial class FieldSemantics
 
         // Strip trailing XML index "[0]" or "[*]"
         string normalized = XmlIndexPattern().Replace(trimmed, "");
+        // Strip leading INI / loc-txt "[Section]" prefix before splitting on '/' (handles "[UI/Menu]systemLanguage")
+        if (normalized.StartsWith('[') && normalized.IndexOf(']') is int leadClose && leadClose > 1 && leadClose + 1 < normalized.Length)
+        {
+            string secInner = normalized[1..leadClose];
+            if (secInner != "*")
+                normalized = normalized[(leadClose + 1)..].Trim();
+        }
         string[] parts = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
         for (int i = parts.Length - 1; i >= 0; i--)
         {
             string seg = parts[i].Replace("~1", "/").Replace("~0", "~").Trim();
-            if (seg.Length == 0 || seg == "*" || AllDigitsPattern().IsMatch(seg))
-                continue;
+            if (seg.StartsWith('[') && seg.IndexOf(']') is int secClose && secClose > 0 && secClose + 1 < seg.Length)
+                seg = seg[(secClose + 1)..].Trim();
             // Strip spreadsheet cell prefix "Sheet!key:foo" -> "foo"
             int keyIdx = seg.IndexOf("key:", StringComparison.OrdinalIgnoreCase);
             if (keyIdx >= 0 && keyIdx + 4 < seg.Length)
                 seg = seg[(keyIdx + 4)..];
+            // Strip duplicate-key "#N" disambiguator ("systemLanguage#5" -> "systemLanguage")
+            int hashIdx = seg.LastIndexOf('#');
+            if (hashIdx > 0 && hashIdx + 1 < seg.Length && AllDigitsPattern().IsMatch(seg[(hashIdx + 1)..]))
+                seg = seg[..hashIdx];
+            if (seg.Length == 0 || seg == "*" || AllDigitsPattern().IsMatch(seg))
+                continue;
             return seg;
         }
         return "";

@@ -9,24 +9,25 @@ public sealed record TeamSettings(string Style = "", string Supervisor = "", str
     string SupervisorModel = "", string TranslatorModel = "", string ReviewerModel = "", int Workers = 0,
     int BatchSize = 0, bool FastMode = false, bool ReviewDrafts = false,
     string SupervisorProfile = "", string TranslatorProfile = "", string ReviewerProfile = "",
-    Dictionary<int, AgentTarget>? WorkerTargets = null);
+    Dictionary<int, AgentTarget>? WorkerTargets = null, bool SmartReview = false);
 public sealed record TeamRow(string Id, long Revision, string Source, string Context, string ExistingTarget = "");
 public sealed record TeamBatch(int Id, string Section, TeamRow[] Rows);
 public sealed record TeamPlan(string Id, string Scope, string Package, string Engine, string Connection, TeamSettings Settings,
     Dictionary<string, string> Prompts, Dictionary<string, string> Glossary, TeamBatch[] Batches, int Workers)
 {
-    public bool UseSupervisor => !Settings.FastMode && Workers > 1
-        && Batches.Select(batch => batch.Section).Distinct(StringComparer.Ordinal).Skip(1).Any();
+    public bool UseSupervisor => !Settings.FastMode && !Settings.ReviewDrafts
+        && ((Workers > 1 && Batches.Select(batch => batch.Section).Distinct(StringComparer.Ordinal).Skip(1).Any())
+            || Batches.Sum(batch => batch.Rows.Length) >= 12);
 }
 public sealed record TeamRequest(string Role, string Model, string Instructions, string Data,
-    int WorkerId = 0, string Profile = "")
+    int WorkerId = 0, string Profile = "", IReadOnlyList<ChatTurn>? History = null)
 {
-    public int InputCharacters => Instructions.Length + Data.Length;
+    public int InputCharacters => Instructions.Length + Data.Length + (History?.Sum(t => t.Content.Length) ?? 0);
 }
 public sealed record TeamNote(string Id, string Source, string Draft, string Suggestion, string Issue);
 public sealed record AgentActivity(int WorkerId, string Role, string Stage, string Section,
     int BatchId, int RowCount, string Detail, TokenUsage? DeltaTokens = null,
-    string Model = "", string Profile = "");
+    string Model = "", string Profile = "", string? SampleSource = null, string? SampleTarget = null);
 public sealed record TeamProgress(int Completed, int Total, int Unknown, int Saved, TranslationUsage Usage,
     string Section = "", string PauseReason = "", AgentActivity? Activity = null);
 
@@ -146,7 +147,8 @@ public sealed class TranslationTeam(ProjectStore store)
     private sealed record Work(string Stage = "translate", bool InFlight = false, string Error = "",
         Dictionary<string, string>? Drafts = null, Dictionary<string, Review>? Reviews = null,
         Dictionary<string, long>? Saved = null, TeamNote[]? Notes = null, string[]? Skipped = null, int Corrections = 0);
-    private sealed record SupervisorState(bool InFlight = false, Dictionary<string, Assignment>? Sections = null, string Error = "");
+    private sealed record SupervisorState(bool InFlight = false, Dictionary<string, Assignment>? Sections = null,
+        string Error = "", string WorldBrief = "", Dictionary<string, string>? AutoGlossary = null);
 
     private sealed class RunTelemetry
     {
@@ -179,7 +181,7 @@ public sealed class TranslationTeam(ProjectStore store)
 
     public TeamSettings Settings
     {
-        get => Deserialize<TeamSettings>(store.Get("team-settings")) ?? new();
+        get => Deserialize<TeamSettings>(store.Get("team-settings")) ?? new(SmartReview: true);
         set => store.Set("team-settings", Serialize(value));
     }
 
@@ -196,10 +198,18 @@ public sealed class TranslationTeam(ProjectStore store)
 
     private static string RoleInstructions(string role, TeamSettings settings) => role switch
     {
-        "supervisor" => Make("أنت مشرف تعريب الألعاب. وزّع الأقسام على جميع المترجمين. قيمة كل معرّف قسم كائن بالحقول worker (رقم المترجم من القائمة) وguidance (تعليمات القسم والمصطلحات المشتركة).",
+        "supervisor" => Make(
+            "أنت بوت الكشّاف وباني عالم اللعبة (Lore & Glossary Bot). حلّل أقسام اللعبة والمصطلحات المتكررة (minedTerms)، وأعد كائن JSON بالحقول: " +
+            "worldBrief (ملخص عربي موجز لهوية اللعبة ونبرة الحوار وتذكير/تأنيث الشخصيات)، " +
+            "glossary (كائن يربط أسماء الشخصيات والأماكن والعناصر المتكررة بتعريبها الموحد)، " +
+            "sections (كائن لكل معرّف قسم بالحقلين worker وguidance لتوجيه المترجمين).",
             settings.Supervisor),
-        "translator" => Make("أنت مترجم ألعاب إلى العربية. استخدم المعجم واتبع السياق والنبرة. " + TranslationContract, settings.Translator),
-        "reviewer" => Make("أنت مراجع مستقل لتعريب الألعاب. " + ReviewContract, settings.Reviewer),
+        "translator" => Make(
+            "أنت بوت مترجم ألعاب مشهدي متسلسل إلى العربية. حافظ على ترابط الحوار مع الأسطر السابقة (previousLines) وسجل المحادثة، والتزم ببطاقة العالم والمعجم المرفق. " +
+            TranslationContract +
+            " يمكنك إعادة كائن JSON مسطّح {\"id\":\"الترجمة\"} أو {\"translations\":{\"id\":\"الترجمة\"},\"newTerms\":{\"English Term\":\"المصطلح الموحد\"}} عند توحيد مصطلح أو اسم علم جديد.",
+            settings.Translator),
+        "reviewer" => Make("أنت بوت المدقق السياقي لتعريب الألعاب. راجع اتساق الضمائر والمصطلحات مع السياق المحيط وبطاقة العالم. " + ReviewContract, settings.Reviewer),
         _ => throw new ArgumentOutOfRangeException(nameof(role))
     };
 
@@ -375,6 +385,8 @@ public sealed class TranslationTeam(ProjectStore store)
         }
     }
 
+    public string WorldBrief(TeamPlan plan) => ReadSupervisor(store, plan.Id).WorldBrief ?? "";
+
     public async Task<TeamProgress> Run(TeamPlan plan, ProviderOptions options, IProgress<TeamProgress>? progress,
         CancellationToken cancellation = default, Func<TeamRequest, CancellationToken, Task<string>>? send = null,
         bool approveReviewed = false, int? overrideWorkers = null, bool? overrideFastMode = null,
@@ -394,7 +406,8 @@ public sealed class TranslationTeam(ProjectStore store)
                 ReviewerModel = (overrideSettings.ReviewerModel ?? "").Trim(),
                 WorkerTargets = overrideSettings.WorkerTargets,
                 Workers = overrideSettings.Workers > 0 ? overrideSettings.Workers : plan.Settings.Workers,
-                FastMode = !plan.Settings.ReviewDrafts && overrideSettings.FastMode
+                FastMode = !plan.Settings.ReviewDrafts && overrideSettings.FastMode,
+                SmartReview = !plan.Settings.ReviewDrafts && !overrideSettings.FastMode && overrideSettings.SmartReview
             };
         ValidateSettings(options, effectiveSettings, profileMap);
         RequireScope(store, plan);
@@ -408,6 +421,7 @@ public sealed class TranslationTeam(ProjectStore store)
         if (approveReviewed) ApproveReady(plan);
 
         bool fastMode = overrideFastMode ?? plan.Settings.FastMode;
+        bool smartReview = !fastMode && !plan.Settings.ReviewDrafts && plan.Settings.SmartReview;
         int concurrency = Math.Clamp(overrideWorkers ?? plan.Workers, 1, Math.Max(1, Math.Min(MaxWorkers, plan.Batches.Length)));
 
         Func<TeamRequest, CancellationToken, Task<StructuredResponse>> sendStructured = send != null
@@ -416,7 +430,7 @@ public sealed class TranslationTeam(ProjectStore store)
             {
                 var route = ResolveRoute(plan.Settings, options, profileMap, request.WorkerId, request.Role);
                 return new ApiProvider(route.Options with { Model = request.Model }, plan.Engine)
-                    .RequestStructuredWithUsage(request.Instructions, request.Data, token);
+                    .RequestChatWithUsage(request.Instructions, request.History, request.Data, token);
             };
 
         var telemetry = new RunTelemetry(Summary(plan));
@@ -426,42 +440,79 @@ public sealed class TranslationTeam(ProjectStore store)
         var rvRoute = ResolveRoute(plan.Settings, options, profileMap, 0, "reviewer");
         int customWorkers = plan.Settings.WorkerTargets?.Count(kv => kv.Key >= 1 && kv.Key <= concurrency
             && kv.Value != null && (!string.IsNullOrWhiteSpace(kv.Value.Profile) || !string.IsNullOrWhiteSpace(kv.Value.Model))) ?? 0;
-        WriteLog(logPath, $"=== START run={plan.Id} mode={(plan.Settings.ReviewDrafts ? "review-drafts" : fastMode ? "fast" : "team")} workers={concurrency} batches={plan.Batches.Length} primary={options.Model} translator={FormatRoute(trRoute)} reviewer={FormatRoute(rvRoute)} customWorkers={customWorkers} ===");
+        string modeLabel = plan.Settings.ReviewDrafts ? "review-drafts" : fastMode ? "fast" : smartReview ? "smart-bots" : "team";
+        WriteLog(logPath, $"=== START run={plan.Id} mode={modeLabel} workers={concurrency} batches={plan.Batches.Length} primary={options.Model} translator={FormatRoute(trRoute)} reviewer={FormatRoute(rvRoute)} customWorkers={customWorkers} ===");
 
-        Dictionary<string, Assignment> assignments = new(StringComparer.Ordinal);
+        var liveGlossary = new LiveGlossary(plan.Glossary, store.BotGlossary());
+        var existingSupervisor = ReadSupervisor(store, plan.Id);
+        string worldBrief = existingSupervisor.WorldBrief ?? "";
+
+        Dictionary<string, Assignment> assignments = existingSupervisor.Sections ?? new(StringComparer.Ordinal);
         if (!fastMode && plan.UseSupervisor)
         {
-            progress?.Report(telemetry.Snapshot(plan.Batches.Length, "المشرف",
-                new AgentActivity(0, "المشرف", "تخطيط", "", 0, plan.Batches.Length, "يوزّع الأقسام ويضع إرشادات الأسلوب…",
+            progress?.Report(telemetry.Snapshot(plan.Batches.Length, "بوت الكشّاف",
+                new AgentActivity(0, "بوت الكشّاف", "تحليل العالم", "", 0, plan.Batches.Length, "يستخرج مسرد الشخصيات والمصطلحات ويبني هوية اللعبة…",
                     Model: supRoute.Model, Profile: supRoute.ProfileName)));
-            Dictionary<string, Assignment>? planned;
+            SupervisorState? plannedState;
             for (int retry = 0; ; retry++)
             {
-                try { planned = await PlanSections(plan, options, profileMap, sendStructured, telemetry, cancellation); break; }
+                try { plannedState = await PlanSections(plan, options, profileMap, sendStructured, telemetry, liveGlossary, cancellation); break; }
                 catch (Exception error) when (retry < 2 && !cancellation.IsCancellationRequested && TranslationRunner.CanRetry(error))
                 { await Task.Delay(TimeSpan.FromSeconds(retry + 1), cancellation); }
                 catch (Exception error) when (error is JsonException or InvalidDataException)
                 {
-                    planned = plan.Batches.Select(batch => batch.Section).Distinct()
+                    var fallbackSections = plan.Batches.Select(batch => batch.Section).Distinct()
                         .Select((section, index) => (section, worker: index % concurrency + 1))
                         .ToDictionary(item => item.section, item => new Assignment(item.worker, ""));
-                    WriteSupervisor(store, plan.Id, new SupervisorState(Sections: planned));
+                    plannedState = new SupervisorState(Sections: fallbackSections);
+                    WriteSupervisor(store, plan.Id, plannedState);
                     break;
                 }
             }
-            if (planned == null)
+            if (plannedState?.Sections == null)
             {
                 cancellation.ThrowIfCancellationRequested();
                 return Summary(plan);
             }
-            assignments = planned;
+            assignments = plannedState.Sections;
+            worldBrief = plannedState.WorldBrief ?? "";
+            int learnedCount = plannedState.AutoGlossary?.Count ?? 0;
+            string scoutDone = learnedCount > 0
+                ? $"جهّز هوية اللعبة ووحد {learnedCount} مصطلحاً عبر {assignments.Count} أقسام"
+                : $"جهّز تعليمات {assignments.Count} أقسام";
             progress?.Report(telemetry.Snapshot(plan.Batches.Length, "",
-                new AgentActivity(0, "المشرف", "انتهى", "", 0, assignments.Count, $"جهّز تعليمات {assignments.Count} أقسام",
+                new AgentActivity(0, "بوت الكشّاف", "انتهى", "", 0, assignments.Count, scoutDone,
                     Model: supRoute.Model, Profile: supRoute.ProfileName)));
         }
 
-        // Dynamic work-stealing queue so all workers stay busy even on single-file games like Star Trucker.
-        var queue = new ConcurrentQueue<TeamBatch>(plan.Batches);
+        // Build contiguous scene lanes so each Translator Bot processes consecutive batches of a scene in order.
+        var preferredWorkers = assignments.Count > 0
+            ? assignments.ToDictionary(kv => kv.Key, kv => kv.Value.Worker, StringComparer.Ordinal)
+            : null;
+        var allLanes = SceneLaneBuilder.BuildLanes(plan.Batches, concurrency, fastMode, preferredWorkers);
+        var workerAssignedLanes = Enumerable.Range(1, concurrency)
+            .ToDictionary(w => w, _ => new ConcurrentQueue<SceneLane>());
+        foreach (var lane in allLanes)
+        {
+            int targetWorker = Math.Clamp(lane.PreferredWorker, 1, concurrency);
+            workerAssignedLanes[targetWorker].Enqueue(lane);
+        }
+
+        bool TryDequeueNextLane(int workerId, out SceneLane? nextLane)
+        {
+            if (workerAssignedLanes[workerId].TryDequeue(out nextLane))
+                return true;
+            // Only steal an entire unstarted contiguous lane if this worker finished all its own lanes
+            foreach (var kv in workerAssignedLanes)
+            {
+                if (kv.Key != workerId && kv.Value.TryDequeue(out nextLane))
+                    return true;
+            }
+            nextLane = null;
+            return false;
+        }
+
+        var batchById = plan.Batches.ToDictionary(b => b.Id);
         using var runCts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         Exception? fatalError = null;
         var workerTasks = Enumerable.Range(1, concurrency).Select(workerId => Task.Run(async () =>
@@ -471,22 +522,54 @@ public sealed class TranslationTeam(ProjectStore store)
                 plan.Settings.ReviewDrafts ? "reviewer" : "translator");
             try
             {
-                while (!telemetry.BudgetStopped && queue.TryDequeue(out var batch))
+                while (!telemetry.BudgetStopped && TryDequeueNextLane(workerId, out var lane) && lane != null)
                 {
-                    runCts.Token.ThrowIfCancellationRequested();
-                    if (ReadBatchStage(worker, plan.Id, batch.Id) == "complete") continue;
-                    string guidance = assignments.GetValueOrDefault(batch.Section)?.Guidance ?? "";
-                    bool completed = await ProcessBatch(worker, workerId, plan, batch, guidance, options, profileMap,
-                        sendStructured, approveReviewed, fastMode, telemetry, progress, logPath, runCts.Token);
-                    if (!completed)
+                    var laneSession = new SceneSessionState(maxTurns: 2, maxHistoryChars: 2400, maxContextLines: 6);
+                    for (int bIdx = 0; bIdx < lane.Batches.Length && !telemetry.BudgetStopped; bIdx++)
                     {
-                        telemetry.BudgetStopped = true;
-                        break;
+                        var batch = lane.Batches[bIdx];
+                        runCts.Token.ThrowIfCancellationRequested();
+                        if (ReadBatchStage(worker, plan.Id, batch.Id) == "complete")
+                        {
+                            var savedTail = ReadBatchContextTail(worker, plan.Id, batch.Id, batch);
+                            if (savedTail.Count > 0)
+                                laneSession.SeedContextTail(laneSession.GetContextTail().Concat(savedTail));
+                            continue;
+                        }
+
+                        // Cross-lane resume continuity: if this lane starts mid-section and preceding batch is already complete, seed its tail!
+                        if (laneSession.GetContextTail().Count == 0
+                            && batchById.TryGetValue(batch.Id - 1, out var prevSecBatch)
+                            && prevSecBatch.Section == batch.Section
+                            && ReadBatchStage(worker, plan.Id, prevSecBatch.Id) == "complete")
+                        {
+                            var crossLaneTail = ReadBatchContextTail(worker, plan.Id, prevSecBatch.Id, prevSecBatch);
+                            if (crossLaneTail.Count > 0)
+                                laneSession.SeedContextTail(crossLaneTail);
+                        }
+
+                        var upcomingLines = bIdx + 1 < lane.Batches.Length
+                            ? lane.Batches[bIdx + 1].Rows
+                                .Where(r => !string.IsNullOrWhiteSpace(r.Source))
+                                .Take(3)
+                                .Select(r => r.Source)
+                                .ToList()
+                            : null;
+
+                        string guidance = assignments.GetValueOrDefault(batch.Section)?.Guidance ?? "";
+                        bool completed = await ProcessBatch(worker, workerId, plan, batch, guidance, worldBrief,
+                            laneSession, upcomingLines, liveGlossary, smartReview, options, profileMap,
+                            sendStructured, approveReviewed, fastMode, telemetry, progress, logPath, runCts.Token);
+                        if (!completed)
+                        {
+                            telemetry.BudgetStopped = true;
+                            break;
+                        }
                     }
                 }
                 progress?.Report(telemetry.Snapshot(plan.Batches.Length, "",
                     new AgentActivity(workerId, $"وكيل #{workerId}", "انتهى", "", 0, 0,
-                        telemetry.BudgetStopped ? "توقّف عند الحد المحدد" : "أنهى جميع الدفعات المتاحة",
+                        telemetry.BudgetStopped ? "توقّف عند الحد المحدد" : "أنهى جميع المسارات المتاحة",
                         Model: defaultRoute.Model, Profile: defaultRoute.ProfileName)));
             }
             catch (OperationCanceledException) when (runCts.IsCancellationRequested)
@@ -577,9 +660,9 @@ public sealed class TranslationTeam(ProjectStore store)
                     }
                     batches.Add(updatedBatch);
                 }
-                plan = plan with { Batches = batches.ToArray() };
-                store.Execute("UPDATE team_runs SET supervisor_inflight=0, pause_reason='', active=1, connection=$conn, settings_json=$set WHERE id=$id",
-                    ("$conn", plan.Connection), ("$set", Serialize(plan.Settings)), ("$id", plan.Id));
+                plan = plan with { Batches = batches.ToArray(), Glossary = store.Glossary() };
+                store.Execute("UPDATE team_runs SET supervisor_inflight=0, pause_reason='', active=1, connection=$conn, settings_json=$set, glossary_json=$gl WHERE id=$id",
+                    ("$conn", plan.Connection), ("$set", Serialize(plan.Settings)), ("$gl", Serialize(plan.Glossary)), ("$id", plan.Id));
             }
             else
             {
@@ -614,18 +697,34 @@ public sealed class TranslationTeam(ProjectStore store)
         catch { store.Execute("ROLLBACK"); throw; }
     }
 
-    private async Task<Dictionary<string, Assignment>?> PlanSections(TeamPlan plan, ProviderOptions options,
+    private async Task<SupervisorState?> PlanSections(TeamPlan plan, ProviderOptions options,
         IReadOnlyDictionary<string, ProviderOptions>? profiles,
-        Func<TeamRequest, CancellationToken, Task<StructuredResponse>> send, RunTelemetry telemetry, CancellationToken cancellation)
+        Func<TeamRequest, CancellationToken, Task<StructuredResponse>> send, RunTelemetry telemetry,
+        LiveGlossary liveGlossary, CancellationToken cancellation)
     {
         var state = ReadSupervisor(store, plan.Id);
-        if (state.InFlight || state.Sections != null) return state.Sections;
+        if (state.InFlight || state.Sections != null) return state;
         var sections = plan.Batches.GroupBy(batch => batch.Section)
-            .Select((group, index) => new { id = "section-" + index, name = group.Key, rows = group.Sum(batch => batch.Rows.Length),
-                sample = group.First().Rows[0].Source[..Math.Min(group.First().Rows[0].Source.Length, 160)] }).ToArray();
-        int workerCount = Math.Min(plan.Workers, sections.Length);
+            .Select((group, index) => new
+            {
+                id = "section-" + index,
+                name = group.Key,
+                rows = group.Sum(batch => batch.Rows.Length),
+                sample = string.Join(" | ", group.SelectMany(b => b.Rows).Take(3)
+                    .Select(r => r.Source[..Math.Min(r.Source.Length, 120)]))
+            }).ToArray();
+        var minedTerms = GameTermMiner.ExtractRecurringTerms(plan.Batches, plan.Glossary, maxTerms: 40);
+        int workerCount = Math.Max(1, Math.Min(plan.Workers, sections.Length));
         var route = ResolveRoute(plan.Settings, options, profiles, 0, "supervisor");
-        var request = Request(plan, route, 0, "supervisor", new { sections, workers = Enumerable.Range(1, workerCount), glossary = plan.Glossary });
+        var request = Request(plan, route, 0, "supervisor", new
+        {
+            sections,
+            workers = Enumerable.Range(1, workerCount),
+            glossary = plan.Glossary,
+            minedTerms = minedTerms.Count > 0
+                ? minedTerms.Select(t => new { term = t.Term, hits = t.Count, speaker = t.IsSpeaker ? (bool?)true : null, sample = t.Sample })
+                : null
+        });
         cancellation.ThrowIfCancellationRequested();
         if (!ReserveSupervisor(store, plan, options, request, telemetry)) return null;
         try
@@ -633,13 +732,24 @@ public sealed class TranslationTeam(ProjectStore store)
             var structured = await send(request, cancellation);
             RecordTokens(store, plan.Id, structured.Tokens, telemetry);
             store.RecordUsage(route.Options.Provider, route.Model, structured.Tokens, request.InputCharacters, 1);
-            var response = ReadMap<Assignment>(structured.Content, sections.Select(section => section.id));
-            if (response.Values.Any(assignment => assignment.Worker < 1 || assignment.Worker > workerCount || assignment.Guidance == null)
-                || response.Values.Select(assignment => assignment.Worker).Distinct().Count() != workerCount)
-                throw new InvalidDataException("خطة المشرف لا تغطي توزيع الأقسام على جميع المترجمين المحددين.");
-            var assignments = sections.ToDictionary(section => section.name, section => response[section.id]);
-            WriteSupervisor(store, plan.Id, new SupervisorState(Sections: assignments));
-            return assignments;
+
+            var (parsedSections, worldBrief, discoveredTerms) = ParseSupervisorResponse(
+                structured.Content,
+                sections.Select(s => (s.id, s.name)).ToArray(),
+                workerCount);
+
+            var acceptedBotTerms = liveGlossary.TryAddBotTerms(discoveredTerms);
+            if (acceptedBotTerms.Count > 0)
+                store.SaveBotTerms(acceptedBotTerms, "lore-bot");
+
+            var completedState = new SupervisorState(
+                InFlight: false,
+                Sections: parsedSections,
+                Error: "",
+                WorldBrief: worldBrief,
+                AutoGlossary: acceptedBotTerms.Count > 0 ? acceptedBotTerms : null);
+            WriteSupervisor(store, plan.Id, completedState);
+            return completedState;
         }
         catch (Exception error) when (RequestFailure(error))
         {
@@ -649,7 +759,71 @@ public sealed class TranslationTeam(ProjectStore store)
         }
     }
 
-    private static async Task<bool> ProcessBatch(ProjectStore worker, int workerId, TeamPlan plan, TeamBatch batch, string guidance,
+    private static (Dictionary<string, Assignment> Sections, string WorldBrief, Dictionary<string, string> DiscoveredTerms)
+        ParseSupervisorResponse(string content, (string Id, string Name)[] sections, int workerCount)
+    {
+        string cleaned = ApiProvider.CleanJsonPayload(content);
+        using var doc = JsonDocument.Parse(cleaned, ApiProvider.LenientJson);
+        var root = doc.RootElement;
+
+        if (root.ValueKind == JsonValueKind.Object
+            && (root.TryGetProperty("worldBrief", out _)
+                || root.TryGetProperty("glossary", out _)
+                || (root.TryGetProperty("sections", out var secProp) && secProp.ValueKind is JsonValueKind.Object or JsonValueKind.Array)))
+        {
+            string worldBrief = "";
+            if (root.TryGetProperty("worldBrief", out var wb) && wb.ValueKind == JsonValueKind.String)
+                worldBrief = (wb.GetString() ?? "").Trim();
+            if (worldBrief.Length > 1200)
+                worldBrief = worldBrief[..1200];
+
+            var terms = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (root.TryGetProperty("glossary", out var gl) && gl.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var p in gl.EnumerateObject())
+                {
+                    if (p.Value.ValueKind == JsonValueKind.String)
+                        terms[p.Name.Trim()] = (p.Value.GetString() ?? "").Trim();
+                }
+            }
+
+            Dictionary<string, Assignment> byId = new(StringComparer.Ordinal);
+            if (root.TryGetProperty("sections", out var secEl) && secEl.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+            {
+                try
+                {
+                    byId = ReadMapCore<Assignment>(secEl.GetRawText(), sections.Select(s => s.Id), allowPartial: true, out _);
+                }
+                catch (InvalidDataException) { }
+            }
+
+            var mapped = new Dictionary<string, Assignment>(StringComparer.Ordinal);
+            for (int i = 0; i < sections.Length; i++)
+            {
+                var (id, name) = sections[i];
+                if (byId.TryGetValue(id, out var found) && found.Guidance != null)
+                {
+                    int w = Math.Clamp(found.Worker, 1, workerCount);
+                    mapped[name] = new Assignment(w, found.Guidance);
+                }
+                else
+                {
+                    mapped[name] = new Assignment((i % workerCount) + 1, "");
+                }
+            }
+            return (mapped, worldBrief, terms);
+        }
+
+        var response = ReadMap<Assignment>(content, sections.Select(s => s.Id));
+        if (response.Values.Any(assignment => assignment.Worker < 1 || assignment.Worker > workerCount || assignment.Guidance == null)
+            || response.Values.Select(assignment => assignment.Worker).Distinct().Count() != workerCount)
+            throw new InvalidDataException("خطة المشرف لا تغطي توزيع الأقسام على جميع المترجمين المحددين.");
+        return (sections.ToDictionary(s => s.Name, s => response[s.Id]), "", new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static async Task<bool> ProcessBatch(ProjectStore worker, int workerId, TeamPlan plan, TeamBatch batch,
+        string guidance, string worldBrief, SceneSessionState laneSession, IReadOnlyList<string>? upcomingLines,
+        LiveGlossary liveGlossary, bool smartReview,
         ProviderOptions options, IReadOnlyDictionary<string, ProviderOptions>? profiles,
         Func<TeamRequest, CancellationToken, Task<StructuredResponse>> send,
         bool approveReviewed, bool fastMode, RunTelemetry telemetry, IProgress<TeamProgress>? progress,
@@ -665,13 +839,30 @@ public sealed class TranslationTeam(ProjectStore store)
             RequireScope(worker, plan);
             if (work.Stage == "apply")
             {
-                int savedNow = Apply(worker, plan, batch, work, approveReviewed);
+                int savedNow = Apply(worker, plan, batch, work, approveReviewed, laneSession);
                 Interlocked.Increment(ref telemetry.Completed);
                 Interlocked.Add(ref telemetry.Saved, savedNow);
+                string? sampleSrc = null, sampleTgt = null;
+                if (savedNow > 0 && work.Drafts != null)
+                {
+                    for (int i = batch.Rows.Length - 1; i >= 0; i--)
+                    {
+                        var r = batch.Rows[i];
+                        if (work.Skipped?.Contains(r.Id) == true) continue;
+                        if (work.Reviews != null && work.Reviews.TryGetValue(r.Id, out var rv) && !rv.Ok) continue;
+                        if (work.Drafts.TryGetValue(r.Id, out var d) && !string.IsNullOrWhiteSpace(r.Source) && !string.IsNullOrWhiteSpace(d))
+                        {
+                            sampleSrc = r.Source;
+                            sampleTgt = d;
+                            break;
+                        }
+                    }
+                }
                 progress?.Report(telemetry.Snapshot(plan.Batches.Length, batch.Section,
                     new AgentActivity(workerId, $"وكيل #{workerId}", "مكتمل", batch.Section, batch.Id, savedNow,
                         $"أنجز دفعة #{batch.Id} ({savedNow}/{batch.Rows.Length} محفوظة)",
-                        Model: lastRoute.Model, Profile: lastRoute.ProfileName)));
+                        Model: lastRoute.Model, Profile: lastRoute.ProfileName,
+                        SampleSource: sampleSrc, SampleTarget: sampleTgt)));
                 return true;
             }
 
@@ -778,13 +969,30 @@ public sealed class TranslationTeam(ProjectStore store)
                     WriteWork(worker, plan.Id, batch.Id, work, syncNotes: false);
                     continue;
                 }
-                int savedNow = Apply(worker, plan, batch, work, approveReviewed);
+                int savedNow = Apply(worker, plan, batch, work, approveReviewed, laneSession);
                 Interlocked.Increment(ref telemetry.Completed);
                 Interlocked.Add(ref telemetry.Saved, savedNow);
+                string? sampleSrc = null, sampleTgt = null;
+                if (savedNow > 0 && work.Drafts != null)
+                {
+                    for (int i = batch.Rows.Length - 1; i >= 0; i--)
+                    {
+                        var r = batch.Rows[i];
+                        if (work.Skipped?.Contains(r.Id) == true) continue;
+                        if (work.Reviews != null && work.Reviews.TryGetValue(r.Id, out var rv) && !rv.Ok) continue;
+                        if (work.Drafts.TryGetValue(r.Id, out var d) && !string.IsNullOrWhiteSpace(r.Source) && !string.IsNullOrWhiteSpace(d))
+                        {
+                            sampleSrc = r.Source;
+                            sampleTgt = d;
+                            break;
+                        }
+                    }
+                }
                 progress?.Report(telemetry.Snapshot(plan.Batches.Length, batch.Section,
                     new AgentActivity(workerId, $"وكيل #{workerId}", "مكتمل", batch.Section, batch.Id, savedNow,
                         $"أنجز دفعة #{batch.Id} ({savedNow}/{batch.Rows.Length} محفوظة)",
-                        Model: lastRoute.Model, Profile: lastRoute.ProfileName)));
+                        Model: lastRoute.Model, Profile: lastRoute.ProfileName,
+                        SampleSource: sampleSrc, SampleTarget: sampleTgt)));
                 return true;
             }
             var masked = rows.ToDictionary(row => row.Id, row => Tokens.Mask(row.Source, plan.Engine));
@@ -797,11 +1005,25 @@ public sealed class TranslationTeam(ProjectStore store)
                 wireToReal[wireId] = rows[i].Id;
                 realToWire[rows[i].Id] = wireId;
             }
+
+            var priorContext = laneSession.GetContextTail();
+            var matchedGlossary = liveGlossary.MatchForTexts(
+                rows.Select(r => r.Source).Concat(priorContext.Select(p => p.Source)));
+            if (matchedGlossary.Count == 0 && plan.Glossary.Count > 0 && plan.Glossary.Count <= 15 && liveGlossary.BotTermCount == 0)
+            {
+                foreach (var kv in plan.Glossary)
+                    matchedGlossary[kv.Key] = kv.Value;
+            }
+
             var data = new
             {
                 batch.Section,
                 guidance = guidance.Length > 0 ? guidance : null,
-                glossary = plan.Glossary.Count > 0 ? plan.Glossary : null,
+                glossary = matchedGlossary.Count > 0 ? matchedGlossary : null,
+                previousLines = priorContext.Count > 0
+                    ? priorContext.Select(p => new { source = p.Source, target = p.Target })
+                    : null,
+                upcomingLines = translate && upcomingLines is { Count: > 0 } ? upcomingLines : null,
                 stage = work.Stage,
                 responseError = work.Error.Length > 0 ? work.Error : null,
                 entries = rows.Select(row => new
@@ -816,7 +1038,7 @@ public sealed class TranslationTeam(ProjectStore store)
                 })
             };
             string roleKey = translate ? "translator" : "reviewer";
-            string roleLabel = translate ? $"مترجم #{workerId}" : $"مراجع #{workerId}";
+            string roleLabel = translate ? $"مترجم #{workerId}" : $"مدقق #{workerId}";
             string stageLabel = work.Stage switch
             {
                 "translate" => "ترجمة",
@@ -826,7 +1048,8 @@ public sealed class TranslationTeam(ProjectStore store)
             };
             var route = ResolveRoute(plan.Settings, options, profiles, workerId, roleKey);
             lastRoute = route;
-            var request = Request(plan, route, workerId, roleKey, data);
+            var history = BuildRequestHistory(work, laneSession, rows, masked, realToWire, translate);
+            var request = Request(plan, route, workerId, roleKey, data, worldBrief, history);
             if (!ReserveBatch(worker, plan, options, request, batch.Id, work with { InFlight = true, Error = "" }, telemetry))
                 return false;
 
@@ -846,11 +1069,17 @@ public sealed class TranslationTeam(ProjectStore store)
                 if (translate)
                 {
                     var drafts = work.Drafts ?? new Dictionary<string, string>(StringComparer.Ordinal);
-                    var parsed = ApiProvider.ReadTranslationsPartial(response, wireToReal.Keys, out var missingWireIds);
+                    var parsed = ApiProvider.ReadTranslationsAndTermsPartial(response, wireToReal.Keys, out var missingWireIds, out var newTerms);
                     foreach (var answer in parsed)
                     {
                         string realId = wireToReal[answer.Key];
                         drafts[realId] = Tokens.Restore(answer.Value, masked[realId].Map);
+                    }
+                    if (newTerms.Count > 0)
+                    {
+                        var acceptedTerms = liveGlossary.TryAddBotTerms(newTerms, overwrite: false);
+                        if (acceptedTerms.Count > 0)
+                            worker.SaveBotTerms(acceptedTerms, "translator-bot", overwrite: false);
                     }
 
                     if (missingWireIds.Count > 0 && !correction && failures < 2)
@@ -870,7 +1099,6 @@ public sealed class TranslationTeam(ProjectStore store)
                     {
                         if (correction)
                         {
-                            // Keep salvaged corrections; mark still-missing rows with error so only missing ones fail
                             var allReviews = work.Reviews ?? new Dictionary<string, Review>(StringComparer.Ordinal);
                             foreach (string missingWire in missingWireIds)
                             {
@@ -910,6 +1138,22 @@ public sealed class TranslationTeam(ProjectStore store)
                             Stage = revise ? "correct" : "apply",
                             Corrections = work.Corrections + (revise ? 1 : 0)
                         };
+                    }
+                    else if (smartReview && !correction)
+                    {
+                        // Smart QA fast-pass: auto-approve clean short standalone UI labels locally so QA Bot focuses on narrative/ambiguous lines!
+                        var allReviews = work.Reviews ?? new Dictionary<string, Review>(StringComparer.Ordinal);
+                        var currentGlossary = liveGlossary.MatchForTexts(batch.Rows.Select(r => r.Source));
+                        foreach (var row in batch.Rows)
+                        {
+                            if (work.Skipped?.Contains(row.Id) == true) continue;
+                            if (allReviews.TryGetValue(row.Id, out var prev) && prev.Ok) continue;
+                            if (!drafts.TryGetValue(row.Id, out string? draftText)) continue;
+                            string issue = LocalIssue(plan, row, draftText);
+                            if (issue.Length == 0 && !SmartQaEvaluator.NeedsReview(row, draftText, currentGlossary))
+                                allReviews[row.Id] = new Review(true, "", "");
+                        }
+                        work = work with { Drafts = drafts, Reviews = allReviews, Stage = "review" };
                     }
                     else
                     {
@@ -1012,7 +1256,7 @@ public sealed class TranslationTeam(ProjectStore store)
                     var reviews = work.Reviews ?? new Dictionary<string, Review>();
                     foreach (var row in rows)
                         reviews[row.Id] = new(false, "تعذّر الحصول على رد صالح بعد إعادة المحاولة. " + error.Message, "");
-                    int savedNow = Apply(worker, plan, batch, work with { Reviews = reviews }, approveReviewed);
+                    int savedNow = Apply(worker, plan, batch, work with { Reviews = reviews }, approveReviewed, laneSession);
                     Interlocked.Increment(ref telemetry.Completed);
                     Interlocked.Add(ref telemetry.Saved, savedNow);
                     progress?.Report(telemetry.Snapshot(plan.Batches.Length, batch.Section,
@@ -1049,9 +1293,63 @@ public sealed class TranslationTeam(ProjectStore store)
         return "";
     }
 
-    private static int Apply(ProjectStore worker, TeamPlan plan, TeamBatch batch, Work work, bool approveReviewed)
+    private static IReadOnlyList<ChatTurn>? BuildRequestHistory(
+        Work work,
+        SceneSessionState laneSession,
+        TeamRow[] rows,
+        Dictionary<string, (string Text, Dictionary<string, string> Map)> masked,
+        Dictionary<string, string> realToWire,
+        bool translate)
+    {
+        if (!translate) return null;
+
+        var history = laneSession.GetHistorySnapshot();
+        if (work.Stage == "correct" && work.Drafts is { Count: > 0 })
+        {
+            string userDraftReq = JsonSerializer.Serialize(new
+            {
+                entries = rows.Select(r => new { id = realToWire[r.Id], source = masked[r.Id].Text })
+            }, PayloadJson);
+            var draftMap = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var r in rows)
+            {
+                if (work.Drafts.TryGetValue(r.Id, out string? d) && !string.IsNullOrWhiteSpace(d))
+                    draftMap[realToWire[r.Id]] = RemaskDraft(d, masked[r.Id].Map);
+            }
+            if (draftMap.Count > 0 && userDraftReq.Length <= 1600)
+            {
+                string assistantDraftJson = JsonSerializer.Serialize(draftMap, PayloadJson);
+                if (assistantDraftJson.Length <= 1600)
+                {
+                    while (history.Count >= 2 && history.Sum(h => h.Content.Length) + userDraftReq.Length + assistantDraftJson.Length > 2800)
+                        history.RemoveRange(0, 2);
+                    history.Add(new ChatTurn("user", userDraftReq));
+                    history.Add(new ChatTurn("assistant", assistantDraftJson));
+                }
+            }
+        }
+        return history.Count > 0 ? history : null;
+    }
+
+    private static string RemaskDraft(string draft, Dictionary<string, string> tokenMap)
+    {
+        if (tokenMap.Count == 0 || string.IsNullOrEmpty(draft)) return draft;
+        string result = draft;
+        foreach (var pair in tokenMap.OrderByDescending(p => p.Value.Length))
+        {
+            if (pair.Value.Length == 0) continue;
+            int idx = result.IndexOf(pair.Value, StringComparison.Ordinal);
+            if (idx >= 0)
+                result = string.Concat(result.AsSpan(0, idx), pair.Key, result.AsSpan(idx + pair.Value.Length));
+        }
+        return result;
+    }
+
+    private static int Apply(ProjectStore worker, TeamPlan plan, TeamBatch batch, Work work, bool approveReviewed,
+        SceneSessionState? laneSession = null)
     {
         bool reviewDrafts = plan.Settings.ReviewDrafts;
+        var completedContext = new List<ContextLine>();
         worker.Execute("BEGIN IMMEDIATE");
         try
         {
@@ -1059,8 +1357,9 @@ public sealed class TranslationTeam(ProjectStore store)
             var saved = work.Saved ?? new Dictionary<string, long>();
             int newlySaved = 0;
             var notes = (work.Notes ?? []).ToList();
-            foreach (var row in batch.Rows)
+            for (int idx = 0; idx < batch.Rows.Length; idx++)
             {
+                var row = batch.Rows[idx];
                 if (work.Skipped?.Contains(row.Id) == true)
                 {
                     notes.Add(new(row.Id, row.Source, "", "", "تغيّر السطر قبل إرساله إلى الفريق."));
@@ -1081,12 +1380,23 @@ public sealed class TranslationTeam(ProjectStore store)
                     worker.Save(current, approveReviewed, pendingOnly: !reviewDrafts);
                     saved[row.Id] = current.Revision;
                     newlySaved++;
+                    if (!string.IsNullOrWhiteSpace(row.Source) && !string.IsNullOrWhiteSpace(target))
+                        completedContext.Add(new ContextLine(row.Source, target));
                 }
             }
+            var tailToPersist = completedContext.Count <= 6 ? completedContext : completedContext[^6..];
             WriteWork(worker, plan.Id, batch.Id,
                 new Work("complete", Saved: saved, Notes: notes.ToArray(), Corrections: Math.Max(1, work.Corrections)),
                 syncNotes: true);
+            if (tailToPersist.Count > 0)
+            {
+                worker.Execute("UPDATE team_batches SET context_tail_json=$tail WHERE run_id=$run AND batch_id=$bid",
+                    ("$tail", Serialize(tailToPersist)), ("$run", plan.Id), ("$bid", batch.Id));
+            }
             worker.Execute("COMMIT");
+
+            if (laneSession != null && completedContext.Count > 0)
+                laneSession.RecordCompletedBatch(completedContext);
             return newlySaved;
         }
         catch { worker.Execute("ROLLBACK"); throw; }
@@ -1097,8 +1407,16 @@ public sealed class TranslationTeam(ProjectStore store)
         && (reviewDrafts ? current.Status is "translated" or "imported" : current.Status == "pending")
         && current.Revision == row.Revision && current.Source == row.Source;
 
-    private static TeamRequest Request(TeamPlan plan, ResolvedRoute route, int workerId, string role, object payload) =>
-        new(role, route.Model, plan.Prompts[role], JsonSerializer.Serialize(payload, PayloadJson), workerId, route.ProfileName);
+    private static TeamRequest Request(TeamPlan plan, ResolvedRoute route, int workerId, string role, object payload,
+        string worldBrief = "", IReadOnlyList<ChatTurn>? history = null)
+    {
+        string basePrompt = plan.Prompts[role];
+        string effectiveInstructions = !string.IsNullOrWhiteSpace(worldBrief) && role != "supervisor"
+            ? basePrompt + "\nبطاقة عالم اللعبة والشخصيات\n" + worldBrief
+            : basePrompt;
+        return new(role, route.Model, effectiveInstructions, JsonSerializer.Serialize(payload, PayloadJson),
+            workerId, route.ProfileName, history);
+    }
 
     private static bool ReserveSupervisor(ProjectStore worker, TeamPlan plan, ProviderOptions options, TeamRequest request, RunTelemetry telemetry) =>
         Reserve(worker, plan, options, request, telemetry, () => worker.Execute(
@@ -1359,21 +1677,46 @@ public sealed class TranslationTeam(ProjectStore store)
 
     private static SupervisorState ReadSupervisor(ProjectStore worker, string runId) =>
         worker.Query("""
-            SELECT supervisor_inflight, supervisor_sections_json, supervisor_error
+            SELECT supervisor_inflight, supervisor_sections_json, supervisor_error, world_brief, auto_glossary_json
             FROM team_runs WHERE id=$id
             """, row => new SupervisorState(
                 row.GetBoolean(0),
                 row.GetString(1) is { Length: > 0 } json ? Deserialize<Dictionary<string, Assignment>>(json) : null,
-                row.GetString(2)),
+                row.GetString(2),
+                row.GetString(3),
+                row.GetString(4) is { Length: > 0 } glJson ? DeserializeSafe<Dictionary<string, string>>(glJson) : null),
             ("$id", runId)).FirstOrDefault() ?? new();
 
     private static void WriteSupervisor(ProjectStore worker, string runId, SupervisorState state) =>
         worker.Execute("""
-            UPDATE team_runs SET supervisor_inflight=$inf, supervisor_sections_json=$sec, supervisor_error=$err
+            UPDATE team_runs
+            SET supervisor_inflight=$inf, supervisor_sections_json=$sec, supervisor_error=$err,
+                world_brief=$wb, auto_glossary_json=$ag
             WHERE id=$id
             """, ("$inf", state.InFlight ? 1 : 0),
             ("$sec", state.Sections == null ? "" : Serialize(state.Sections)),
-            ("$err", state.Error ?? ""), ("$id", runId));
+            ("$err", state.Error ?? ""),
+            ("$wb", state.WorldBrief ?? ""),
+            ("$ag", state.AutoGlossary == null ? "" : Serialize(state.AutoGlossary)),
+            ("$id", runId));
+
+    private static List<ContextLine> ReadBatchContextTail(ProjectStore worker, string runId, int batchId, TeamBatch batch)
+    {
+        string raw = worker.Query("SELECT context_tail_json FROM team_batches WHERE run_id=$run AND batch_id=$bid",
+            r => r.GetString(0), ("$run", runId), ("$bid", batchId)).FirstOrDefault() ?? "";
+        if (raw.Length > 0 && DeserializeSafe<List<ContextLine>>(raw) is { Count: > 0 } persisted)
+            return persisted;
+
+        var fallback = new List<ContextLine>();
+        foreach (var row in batch.Rows.TakeLast(6))
+        {
+            var unit = worker.UnitsById(row.Id);
+            if (unit != null && unit.Warning.Length == 0 && unit.Status != "conflict"
+                && !string.IsNullOrWhiteSpace(unit.Source) && !string.IsNullOrWhiteSpace(unit.Target))
+                fallback.Add(new ContextLine(unit.Source, unit.Target));
+        }
+        return fallback;
+    }
 
     private static TranslationUsage ReadUsage(ProjectStore worker, string runId) =>
         worker.Query("SELECT used_characters, used_requests, used_input_tokens, used_output_tokens, used_total_tokens FROM team_runs WHERE id=$id",

@@ -16,6 +16,37 @@ public static class Tokens
     public static List<string> Find(string text, string engine = "") =>
         Pattern(engine).Matches(text).Select(m => m.Value).Order(StringComparer.Ordinal).ToList();
 
+    public static List<TokenInspection> Inspect(string source, string target, string engine = "")
+    {
+        var regex = Pattern(engine);
+        var order = new List<string>();
+        var expected = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (Match m in regex.Matches(source ?? ""))
+        {
+            if (!expected.TryGetValue(m.Value, out int count))
+            {
+                order.Add(m.Value);
+                expected[m.Value] = 1;
+            }
+            else
+            {
+                expected[m.Value] = count + 1;
+            }
+        }
+        if (order.Count == 0) return [];
+
+        var present = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (Match m in regex.Matches(target ?? ""))
+        {
+            present[m.Value] = present.GetValueOrDefault(m.Value) + 1;
+        }
+
+        var result = new List<TokenInspection>(order.Count);
+        foreach (string tok in order)
+            result.Add(new TokenInspection(tok, expected[tok], present.GetValueOrDefault(tok)));
+        return result;
+    }
+
     public static string Validate(string source, string target, string engine = "")
     {
         var expected = Find(source, engine);
@@ -66,11 +97,16 @@ public static class Tokens
     }
     public static string Restore(string target,Dictionary<string,string> map){foreach(var pair in map)target=target.Replace(pair.Key,pair.Value,StringComparison.Ordinal);return target;}
 }
+public sealed record TokenInspection(string Token, int ExpectedCount, int PresentCount)
+{
+    public bool IsSatisfied => PresentCount == ExpectedCount;
+}
 public sealed record TokenUsage(long InputTokens = 0, long OutputTokens = 0, long TotalTokens = 0)
 {
     public static TokenUsage operator +(TokenUsage a, TokenUsage b) =>
         new(a.InputTokens + b.InputTokens, a.OutputTokens + b.OutputTokens, a.TotalTokens + b.TotalTokens);
 }
+public sealed record ChatTurn(string Role, string Content);
 public sealed record StructuredResponse(string Content, TokenUsage Tokens);
 public record ProviderOptions(string Provider,string Model,string ApiKey,string? BaseUrl=null,string? Region=null,int BatchSize=15,int MaxCharacters=50000,int MaxRequests=100,int? MaxUnits=null,string? CertificateSha256=null,bool JsonMode=false);
 public record TranslationProgress(int Completed,int Total,string Message,TokenUsage? Tokens=null);
@@ -205,6 +241,76 @@ public sealed partial class ApiProvider : ITranslationProvider
         return ReadTranslationsCore(content, ids, allowBlankIds, allowPartial: true, out missingIds);
     }
 
+    internal static Dictionary<string, string> ReadTranslationsAndTermsPartial(string content, IEnumerable<string> ids,
+        out List<string> missingIds, out Dictionary<string, string> newTerms, IReadOnlySet<string>? allowBlankIds = null)
+    {
+        var idList = ids as IReadOnlyCollection<string> ?? ids.ToList();
+        var expectedSet = idList.ToHashSet(StringComparer.Ordinal);
+        newTerms = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string effectiveContent = content;
+        try
+        {
+            using var doc = JsonDocument.Parse(CleanJsonPayload(content), LenientJson);
+            var root = doc.RootElement;
+            // Unwrap outer single-key wrapper (e.g. {"data": {"translations": {...}, "newTerms": {...}}}) when not an expected ID
+            for (int depth = 0; depth < 2 && root.ValueKind == JsonValueKind.Object; depth++)
+            {
+                var props = root.EnumerateObject().ToArray();
+                if (props.Length == 1 && !expectedSet.Contains(props[0].Name) && WrapperKeys.Contains(props[0].Name)
+                    && props[0].Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+                {
+                    root = props[0].Value;
+                    continue;
+                }
+                break;
+            }
+
+            if (root.ValueKind == JsonValueKind.Object)
+            {
+                bool rootHasDirectExpectedIds = root.EnumerateObject().Any(p => expectedSet.Contains(p.Name));
+                JsonElement? transNode = null;
+                foreach (var prop in root.EnumerateObject())
+                {
+                    if (expectedSet.Contains(prop.Name)) continue;
+
+                    if (!rootHasDirectExpectedIds && WrapperKeys.Contains(prop.Name)
+                        && prop.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+                    {
+                        transNode ??= prop.Value;
+                    }
+                    else if ((prop.Name.Equals("newTerms", StringComparison.OrdinalIgnoreCase)
+                              || prop.Name.Equals("glossary", StringComparison.OrdinalIgnoreCase)
+                              || prop.Name.Equals("terms", StringComparison.OrdinalIgnoreCase))
+                             && prop.Value.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (var termProp in prop.Value.EnumerateObject())
+                        {
+                            if (termProp.Value.ValueKind != JsonValueKind.String) continue;
+                            string k = termProp.Name.Trim();
+                            string v = (termProp.Value.GetString() ?? "").Trim();
+                            if (k.Length >= 2 && k.Length <= 80 && v.Length >= 1 && v.Length <= 100
+                                && !k.Contains("__LOCARA_", StringComparison.Ordinal)
+                                && !v.Contains("__LOCARA_", StringComparison.Ordinal))
+                            {
+                                newTerms[k] = v;
+                            }
+                        }
+                    }
+                }
+                if (transNode.HasValue)
+                    effectiveContent = transNode.Value.GetRawText();
+                else if (rootHasDirectExpectedIds)
+                    effectiveContent = root.GetRawText();
+            }
+        }
+        catch (JsonException)
+        {
+            // Fall through to ReadTranslationsCore which emits the standard Arabic error
+        }
+
+        return ReadTranslationsCore(effectiveContent, idList, allowBlankIds, allowPartial: true, out missingIds);
+    }
+
     private static Dictionary<string, string> ReadTranslationsCore(string content, IEnumerable<string> ids,
         IReadOnlySet<string>? allowBlankIds, bool allowPartial, out List<string> missingIds)
     {
@@ -335,37 +441,88 @@ public sealed partial class ApiProvider : ITranslationProvider
     internal async Task<string> RequestStructured(string instructions, string data, CancellationToken cancellation) =>
         (await RequestStructuredWithUsage(instructions, data, cancellation)).Content;
 
-    internal async Task<StructuredResponse> RequestStructuredWithUsage(string instructions, string data, CancellationToken cancellation)
+    internal Task<StructuredResponse> RequestStructuredWithUsage(string instructions, string data, CancellationToken cancellation) =>
+        RequestChatWithUsage(instructions, null, data, cancellation);
+
+    internal async Task<StructuredResponse> RequestChatWithUsage(string instructions, IReadOnlyList<ChatTurn>? history,
+        string data, CancellationToken cancellation)
     {
         string provider = options.Provider.ToLowerInvariant();
+        if (provider == "azure")
+            throw new NotSupportedException("اختر مزوّداً يدعم تعليمات النظام لفريق الترجمة.");
+
+        var normalizedTurns = NormalizeAlternatingHistory(history);
         bool jsonObject = provider == "deepseek" || (provider == "openai-compatible" && options.JsonMode);
-        object body = provider switch
+
+        object body;
+        if (provider == "gemini")
         {
-            "gemini" => new
+            var contents = new List<object>(normalizedTurns.Count + 1);
+            foreach (var turn in normalizedTurns)
+            {
+                string gRole = turn.Role == "assistant" ? "model" : "user";
+                contents.Add(new { role = gRole, parts = new[] { new { text = turn.Content } } });
+            }
+            contents.Add(new { role = "user", parts = new[] { new { text = data } } });
+            body = new
             {
                 systemInstruction = new { parts = new[] { new { text = instructions } } },
-                contents = new[] { new { parts = new[] { new { text = data } } } },
+                contents,
                 generationConfig = new { responseMimeType = "application/json" }
-            },
-            "anthropic" => new { model = options.Model, max_tokens = 8192, system = instructions,
-                messages = new[] { new { role = "user", content = data } } },
-            "azure" => throw new NotSupportedException("اختر مزوّداً يدعم تعليمات النظام لفريق الترجمة."),
-            _ when jsonObject => new
+            };
+        }
+        else if (provider == "anthropic")
+        {
+            var messages = new List<object>(normalizedTurns.Count + 1);
+            foreach (var turn in normalizedTurns)
+                messages.Add(new { role = turn.Role, content = turn.Content });
+            messages.Add(new { role = "user", content = data });
+            body = new { model = options.Model, max_tokens = 8192, system = instructions, messages };
+        }
+        else
+        {
+            var messages = new List<object>(normalizedTurns.Count + 2)
             {
-                model = options.Model,
-                messages = new[] { new { role = "system", content = instructions }, new { role = "user", content = data } },
-                response_format = new { type = "json_object" }
-            },
-            _ => new
-            {
-                model = options.Model,
-                messages = new[] { new { role = "system", content = instructions }, new { role = "user", content = data } }
-            }
-        };
+                new { role = "system", content = instructions }
+            };
+            foreach (var turn in normalizedTurns)
+                messages.Add(new { role = turn.Role, content = turn.Content });
+            messages.Add(new { role = "user", content = data });
+            body = jsonObject
+                ? new { model = options.Model, messages, response_format = new { type = "json_object" } }
+                : new { model = options.Model, messages };
+        }
+
         using var response = await Send(body, cancellation);
         var tokens = ExtractUsage(response.RootElement);
         LastTokens = tokens;
         return new(ExtractMessage(response.RootElement), tokens);
+    }
+
+    private static List<ChatTurn> NormalizeAlternatingHistory(IReadOnlyList<ChatTurn>? history)
+    {
+        if (history == null || history.Count == 0) return [];
+        var clean = new List<ChatTurn>(history.Count);
+        string? pendingUser = null;
+        foreach (var turn in history)
+        {
+            if (turn == null || string.IsNullOrWhiteSpace(turn.Content)) continue;
+            string rawRole = turn.Role ?? "";
+            bool isAssistant = rawRole.Equals("assistant", StringComparison.OrdinalIgnoreCase)
+                || rawRole.Equals("model", StringComparison.OrdinalIgnoreCase);
+            if (!isAssistant)
+            {
+                // Latest user turn replaces any previous unpaired user turn
+                pendingUser = turn.Content;
+            }
+            else if (pendingUser != null)
+            {
+                clean.Add(new ChatTurn("user", pendingUser));
+                clean.Add(new ChatTurn("assistant", turn.Content));
+                pendingUser = null;
+            }
+        }
+        return clean;
     }
 
     internal TokenUsage ExtractUsage(JsonElement response)

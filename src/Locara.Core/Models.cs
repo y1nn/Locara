@@ -31,6 +31,7 @@ public record ExtractionPreview(IReadOnlyList<TablePreview> Tables, IReadOnlyLis
 public record ProjectInfo(string Name, string Source, string Engine);
 public sealed class Unit : INotifyPropertyChanged
 {
+    private string target = "";
     private string status = "pending";
     private string warning = "";
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -40,7 +41,16 @@ public sealed class Unit : INotifyPropertyChanged
     public string Path { get; set; } = "";
     public string Locator { get; set; } = "";
     public string Source { get; set; } = "";
-    public string Target { get; set; } = "";
+    public string Target
+    {
+        get => target;
+        set
+        {
+            if (target == value) return;
+            target = value;
+            PropertyChanged?.Invoke(this, new(nameof(Target)));
+        }
+    }
     public string Context { get; set; } = "";
     public string Status
     {

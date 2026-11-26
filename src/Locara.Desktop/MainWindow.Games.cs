@@ -26,14 +26,33 @@ public partial class MainWindow
 
     private void SourceDragOver(object sender, DragEventArgs e)
     {
-        e.Effects = work == null && e.Data.GetData(DataFormats.FileDrop) is string[] { Length: 1 }
-            && e.AllowedEffects.HasFlag(DragDropEffects.Copy) ? DragDropEffects.Copy : DragDropEffects.None;
+        bool canDrop = work == null && e.Data.GetData(DataFormats.FileDrop) is string[] { Length: 1 }
+            && e.AllowedEffects.HasFlag(DragDropEffects.Copy);
+        e.Effects = canDrop ? DragDropEffects.Copy : DragDropEffects.None;
+        if (DropZoneBorder != null && canDrop)
+        {
+            DropZoneBorder.BorderBrush = ResBrush("AccentIndicator");
+            DropZoneBorder.Background = ResBrush("AccentSoft");
+        }
         e.Handled = true;
+    }
+
+    private void SourceDragLeave(object sender, DragEventArgs e)
+    {
+        ResetDropZoneVisual();
+    }
+
+    private void ResetDropZoneVisual()
+    {
+        if (DropZoneBorder == null) return;
+        DropZoneBorder.SetResourceReference(System.Windows.Controls.Border.BorderBrushProperty, "BorderSubtle");
+        DropZoneBorder.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "BgSurface");
     }
 
     private async void DropSource(object sender, DragEventArgs e)
     {
         e.Handled = true;
+        ResetDropZoneVisual();
         if (work == null && e.Data.GetData(DataFormats.FileDrop) is string[] { Length: 1 } files)
             await StartSource(files[0]);
     }
@@ -213,7 +232,7 @@ public partial class MainWindow
                 GameLaunch.RenpyCopy => ChooseRenpySdk(path),
                 _ => null
             };
-            Tabs.SelectedItem = PackagesPage;
+            SelectStage(PackagesPage);
             var progress = new Progress<string>(message => BuildLog.Text = message);
             if (capability.Launch == GameLaunch.Steam)
             {

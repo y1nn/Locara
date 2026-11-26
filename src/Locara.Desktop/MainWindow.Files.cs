@@ -8,11 +8,8 @@ namespace Locara.Desktop;
 
 public partial class MainWindow
 {
-    private static readonly SolidColorBrush VerdictGreen = new(Color.FromRgb(0x14, 0x63, 0x56));
-    private static readonly SolidColorBrush VerdictAmber = new(Color.FromRgb(0x9A, 0x5B, 0x00));
-    private static readonly SolidColorBrush VerdictMuted = new(Color.FromRgb(0x5A, 0x6D, 0x73));
-    private static readonly SolidColorBrush VerdictSlate = new(Color.FromRgb(0x4A, 0x65, 0x72));
-    private static readonly SolidColorBrush VerdictRed = new(Color.FromRgb(0xA9, 0x32, 0x26));
+    private static Brush LookupThemeBrush(string key, Color fallback) =>
+        Application.Current?.Resources[key] as Brush ?? new SolidColorBrush(fallback);
 
     private sealed class ScannedFileRow(FileQualitySummary summary) : INotifyPropertyChanged
     {
@@ -93,11 +90,11 @@ public partial class MainWindow
 
         public Brush VerdictBrush => summary.Verdict switch
         {
-            FileQualityVerdict.Translatable => VerdictGreen,
-            FileQualityVerdict.Mixed => VerdictAmber,
-            FileQualityVerdict.AuxiliaryData => VerdictMuted,
-            FileQualityVerdict.SecondaryLanguage => VerdictSlate,
-            _ => VerdictRed
+            FileQualityVerdict.Translatable => LookupThemeBrush("SuccessFg", Color.FromRgb(0x28, 0xCE, 0x9B)),
+            FileQualityVerdict.Mixed => LookupThemeBrush("WarningFg", Color.FromRgb(0xEA, 0xA8, 0x3B)),
+            FileQualityVerdict.AuxiliaryData => LookupThemeBrush("TextMuted", Color.FromRgb(0x66, 0x7B, 0x81)),
+            FileQualityVerdict.SecondaryLanguage => LookupThemeBrush("InfoFg", Color.FromRgb(0x47, 0xBD, 0xF8)),
+            _ => LookupThemeBrush("DangerFg", Color.FromRgb(0xF0, 0x6A, 0x6A))
         };
 
         public string SamplesPreview => summary.Samples.Count == 0
@@ -192,9 +189,10 @@ public partial class MainWindow
     {
         if (currentScannedFiles.Count == 0)
         {
-            FilesSelectionSummary.Text = "لا توجد ملفات مفحوصة بعد — اضغط «فحص الملفات» لاستعراض الملفات ومعاينة نصوصها.";
+            FilesSelectionSummary.Text = "لا توجد ملفات مفحوصة بعد — اضغط «افحص ملفات اللعبة» لاستعراض الملفات ومعاينة نصوصها.";
             FilesGuardBanner.Visibility = Visibility.Collapsed;
             TranslationFilesGuardText.Text = "";
+            if (NavFiles != null) NavFiles.Tag = "";
             return;
         }
 
@@ -213,20 +211,26 @@ public partial class MainWindow
             && !currentScannedFiles.Any(f => f.Included && f.Format == "po" && !ProjectService.IsGettextTemplate(f.Path))
             && currentScannedFiles.Any(f => !f.Included && f.Format == "po" && !ProjectService.IsGettextTemplate(f.Path));
 
+        if (NavFiles != null)
+            NavFiles.Tag = includedFiles > 0 ? $"{includedFiles}" : "!";
+        if (ContinueToBotsBtn != null)
+            ContinueToBotsBtn.Visibility = includedUnits > 0 ? Visibility.Visible : Visibility.Collapsed;
+
         FilesSelectionSummary.Text = excludedFiles == 0 && excludedUnits == 0
             ? $"المفعّل للترجمة: {includedFiles:N0} ملف ({includedUnits:N0} نص)"
             : $"المفعّل للترجمة: {includedFiles:N0} ملف ({includedUnits:N0} نص)  ·  المستبعد: {excludedFiles:N0} ملف ({excludedUnits:N0} نص)";
 
+        FilesGuardBanner.Visibility = Visibility.Visible;
+        UpdateHeaderPrimaryVisibility();
         if (includedFiles == 0 && excludedFiles > 0)
         {
-            FilesGuardBanner.Visibility = Visibility.Visible;
-            FilesGuardTitle.Text = $"استُبعدت جميع الملفات المكتشفة ({excludedFiles:N0} ملف تقني/مختلط/غير محدد) لحماية رصيدك";
-            FilesGuardDetail.Text = "لم تُعثر على ملفات نصوص بشرية صافية تلقائياً. افتح تبويب «الملفات» لتشغيل «تحليل ذكي (AI Scout)» أو معاينة العينات وتفعيل النصوص البشرية فقط.";
+            FilesGuardTitle.Text = $"استُبعدت جميع الملفات المكتشفة ({excludedFiles:N0} ملف تقني/مختلط) لحماية رصيدك";
+            FilesGuardTitle.SetResourceReference(TextBlock.ForegroundProperty, "WarningFg");
+            FilesGuardDetail.Text = "شغّل «تحليل ذكي (AI Scout)» أو عاين العينات أدناه وفعّل النصوص البشرية فقط.";
             TranslationFilesGuardText.Text = $"تنبيه: لا توجد ملفات مفعّلة للترجمة حالياً ({excludedFiles:N0} ملف مستبعد).";
         }
         else if (flaggedIncluded > 0 || technicalExcluded > 0 || mixedExcluded > 0 || auxiliaryExcluded > 0 || secondaryExcluded > 0 || hasPotOnlyWithSiblingPo)
         {
-            FilesGuardBanner.Visibility = Visibility.Visible;
             var parts = new List<string>();
             if (auxiliaryExcluded > 0)
                 parts.Add($"استُبعد {auxiliaryExcluded:N0} ملف بيانات جانبي لوجود ملفات ترجمة رسمية");
@@ -240,7 +244,8 @@ public partial class MainWindow
                 parts.Add($"يوجد {flaggedIncluded:N0} ملف مفعّل بتصنيف مختلط أو تقني — يُنصح باستخدام «تحليل ذكي (AI Scout)» أو «تفعيل النصوص البشرية فقط»");
             if (hasPotOnlyWithSiblingPo)
                 parts.Add("ملاحظة Gettext: النصوص الحالية في قالب (.pot) ومعظم الألعاب تقرأ ملف (.po) عند التثبيت");
-            FilesGuardTitle.Text = "حماية ما قبل الترجمة (فحص جودة الملفات)";
+            FilesGuardTitle.Text = $"المصدر جاهز للتعريب — {includedFiles:N0} ملف مفعّل ({includedUnits:N0} نص)";
+            FilesGuardTitle.SetResourceReference(TextBlock.ForegroundProperty, flaggedIncluded > 0 ? "WarningFg" : "AccentIndicator");
             FilesGuardDetail.Text = string.Join(" · ", parts) + ".";
             var brief = new List<string> { $"الملفات المفعّلة: {includedFiles:N0}/{currentScannedFiles.Count:N0} ({includedUnits:N0} نص)" };
             if (flaggedIncluded > 0) brief.Add($"تنبيه: {flaggedIncluded:N0} ملف مختلط/تقني مفعّل");
@@ -252,7 +257,9 @@ public partial class MainWindow
         }
         else
         {
-            FilesGuardBanner.Visibility = Visibility.Collapsed;
+            FilesGuardTitle.Text = $"الملفات صافية وجاهزة للتعريب ({includedFiles:N0} ملف · {includedUnits:N0} نص)";
+            FilesGuardTitle.SetResourceReference(TextBlock.ForegroundProperty, "SuccessFg");
+            FilesGuardDetail.Text = "لم يُكتشف أي تداخل تقني في الملفات المحددة — انتقل إلى غرفة البوتات لبدء التعريب التلقائي.";
             TranslationFilesGuardText.Text = $"الملفات المفعّلة للترجمة: {includedFiles:N0} من {currentScannedFiles.Count:N0} ({includedUnits:N0} نص).";
         }
     }
@@ -433,8 +440,7 @@ public partial class MainWindow
         try { options = ReadProvider(); }
         catch (Exception error)
         {
-            Tabs.SelectedItem = TranslationPage;
-            ConnectionPanel.IsExpanded = true;
+            OpenConnectionSettings();
             Status.Text = "أكمل إعداد اتصال الذكاء الاصطناعي أولاً: " + error.Message;
             return;
         }

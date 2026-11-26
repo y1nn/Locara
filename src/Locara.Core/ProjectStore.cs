@@ -27,6 +27,70 @@ public sealed class ProjectStore : IDisposable
         return name;
     }
 
+    public static RecentProjectSummary ReadRecentSummary(string directoryPath)
+    {
+        string cleanPath = string.IsNullOrWhiteSpace(directoryPath) ? "" : Path.TrimEndingDirectorySeparator(directoryPath.Trim());
+        string fallbackName = Path.GetFileNameWithoutExtension(cleanPath);
+        if (string.IsNullOrWhiteSpace(fallbackName)) fallbackName = "مشروع تعريب";
+        string db = Path.Combine(cleanPath, "project.db");
+        if (cleanPath.Length == 0 || !File.Exists(db))
+            return new(cleanPath, fallbackName, "", "", 0, 0, 0, Exists: false);
+
+        try
+        {
+            var connSettings = new SqliteConnectionStringBuilder
+            {
+                DataSource = db,
+                Mode = SqliteOpenMode.ReadOnly,
+                Pooling = false,
+                DefaultTimeout = 1
+            };
+            using var conn = new SqliteConnection(connSettings.ToString());
+            conn.Open();
+
+            var settingsMap = new Dictionary<string, string>(StringComparer.Ordinal);
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT key, value FROM settings WHERE key IN ('name','source','engine','scanned_engine')";
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                    settingsMap[reader.GetString(0)] = reader.GetString(1);
+            }
+
+            string name = settingsMap.TryGetValue("name", out var n) && !string.IsNullOrWhiteSpace(n) ? n : fallbackName;
+            string source = settingsMap.GetValueOrDefault("source") ?? "";
+            string scannedEngine = settingsMap.GetValueOrDefault("scanned_engine") ?? "";
+            string rawEngine = settingsMap.GetValueOrDefault("engine") ?? "";
+            string engine = !string.IsNullOrWhiteSpace(scannedEngine)
+                ? scannedEngine
+                : (string.IsNullOrWhiteSpace(rawEngine) || rawEngine.Equals("auto", StringComparison.OrdinalIgnoreCase) ? "" : rawEngine);
+
+            int total = 0, review = 0, approved = 0;
+            using (var countCmd = conn.CreateCommand())
+            {
+                countCmd.CommandText = """
+                    SELECT COUNT(*),
+                           COUNT(*) FILTER (WHERE status IN ('translated','imported') AND warning=''),
+                           COUNT(*) FILTER (WHERE status='approved')
+                    FROM units WHERE active=1
+                    """;
+                using var reader = countCmd.ExecuteReader();
+                if (reader.Read())
+                {
+                    total = reader.GetInt32(0);
+                    review = reader.GetInt32(1);
+                    approved = reader.GetInt32(2);
+                }
+            }
+
+            return new(cleanPath, name, source, engine, total, approved + review, approved, Exists: true);
+        }
+        catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
+        {
+            return new(cleanPath, fallbackName, "", "", 0, 0, 0, Exists: false);
+        }
+    }
+
     private const string V3Schema = """
         CREATE INDEX IF NOT EXISTS units_order ON units(active,status,path,locator);
         CREATE INDEX IF NOT EXISTS units_memory ON units(active,status,source,context);
@@ -112,6 +176,15 @@ public sealed class ProjectStore : IDisposable
         );
         """;
 
+    private const string V6Schema = """
+        CREATE TABLE IF NOT EXISTS bot_glossary(
+            source TEXT PRIMARY KEY COLLATE NOCASE,
+            target TEXT NOT NULL,
+            note TEXT NOT NULL DEFAULT '',
+            updated TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        """;
+
     public ProjectStore(string directory) : this(directory, 30) { }
 
     public ProjectStore(string directory, int commandTimeout)
@@ -125,8 +198,8 @@ public sealed class ProjectStore : IDisposable
         try
         {
             connection.Open();
-            Execute($"PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout={Math.Min(commandTimeout, 15) * 1000};");
-            if (SchemaVersion() != 5) Upgrade();
+            Execute($"PRAGMA busy_timeout={Math.Min(commandTimeout, 15) * 1000}; PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
+            if (SchemaVersion() != 6) Upgrade();
         }
         catch { connection.Dispose(); throw; }
     }
@@ -178,7 +251,21 @@ public sealed class ProjectStore : IDisposable
                 Execute("PRAGMA user_version=5;");
                 version = 5;
             }
-            if (version != 5) throw new InvalidDataException("Unsupported project database version.");
+            if (version == 5)
+            {
+                Execute(V6Schema);
+                var runCols = Query("PRAGMA table_info(team_runs)", row => row.GetString(1)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (!runCols.Contains("world_brief"))
+                    Execute("ALTER TABLE team_runs ADD COLUMN world_brief TEXT NOT NULL DEFAULT '';");
+                if (!runCols.Contains("auto_glossary_json"))
+                    Execute("ALTER TABLE team_runs ADD COLUMN auto_glossary_json TEXT NOT NULL DEFAULT '';");
+                var batchCols = Query("PRAGMA table_info(team_batches)", row => row.GetString(1)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (!batchCols.Contains("context_tail_json"))
+                    Execute("ALTER TABLE team_batches ADD COLUMN context_tail_json TEXT NOT NULL DEFAULT '';");
+                Execute("PRAGMA user_version=6;");
+                version = 6;
+            }
+            if (version != 6) throw new InvalidDataException("Unsupported project database version.");
             Execute("COMMIT");
         }
         catch { Execute("ROLLBACK"); throw; }
@@ -261,12 +348,15 @@ public sealed class ProjectStore : IDisposable
                 CREATE TABLE glossary(source TEXT PRIMARY KEY,target TEXT NOT NULL);
                 CREATE TABLE attempts(id INTEGER PRIMARY KEY,unit_id TEXT NOT NULL,provider TEXT NOT NULL,state TEXT NOT NULL,created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
                 CREATE TABLE sources(path TEXT PRIMARY KEY COLLATE NOCASE, scope TEXT NOT NULL UNIQUE);
-                """ + "\n" + V3Schema + "\n" + V5Schema + "\n"
+                """ + "\n" + V3Schema + "\n" + V5Schema + "\n" + V6Schema + "\n"
                 + """
                 ALTER TABLE team_runs ADD COLUMN used_input_tokens INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE team_runs ADD COLUMN used_output_tokens INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE team_runs ADD COLUMN used_total_tokens INTEGER NOT NULL DEFAULT 0;
-                PRAGMA user_version=5;
+                ALTER TABLE team_runs ADD COLUMN world_brief TEXT NOT NULL DEFAULT '';
+                ALTER TABLE team_runs ADD COLUMN auto_glossary_json TEXT NOT NULL DEFAULT '';
+                ALTER TABLE team_batches ADD COLUMN context_tail_json TEXT NOT NULL DEFAULT '';
+                PRAGMA user_version=6;
                 """;
             cmd.ExecuteNonQuery();
         }
@@ -448,6 +538,115 @@ public sealed class ProjectStore : IDisposable
     public Dictionary<string,string> Glossary() => Query("SELECT source,target FROM glossary", r => (r.GetString(0), r.GetString(1))).ToDictionary(x => x.Item1, x => x.Item2);
     public void RemoveTerm(string source) => Execute("DELETE FROM glossary WHERE source=$s", ("$s", source));
 
+    public Dictionary<string, string> BotGlossary()
+    {
+        var rows = Query("SELECT source, target FROM bot_glossary ORDER BY (note='lore-bot') DESC, rowid ASC",
+            r => (Source: r.GetString(0), Target: r.GetString(1)));
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (src, tgt) in rows)
+        {
+            if (!map.ContainsKey(src))
+                map[src] = tgt;
+        }
+        return map;
+    }
+
+    public List<BotGlossaryEntry> BotGlossaryEntries()
+    {
+        var rows = Query("SELECT source, target, note, updated FROM bot_glossary ORDER BY (note='lore-bot') DESC, rowid ASC",
+            r => new BotGlossaryEntry(r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3)));
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<BotGlossaryEntry>(rows.Count);
+        foreach (var entry in rows)
+        {
+            if (seen.Add(entry.Source))
+                result.Add(entry);
+        }
+        return result;
+    }
+
+    public void RemoveBotTerm(string source)
+    {
+        string s = (source ?? "").Trim();
+        if (s.Length == 0) return;
+        Execute("DELETE FROM bot_glossary WHERE source=$s", ("$s", s));
+    }
+
+    public void PromoteBotTerm(string source, string? targetOverride = null)
+    {
+        string s = (source ?? "").Trim();
+        if (s.Length == 0) return;
+        Execute("BEGIN IMMEDIATE");
+        try
+        {
+            string target = (targetOverride ?? "").Trim();
+            if (target.Length == 0)
+            {
+                target = Query("SELECT target FROM bot_glossary WHERE source=$s ORDER BY (note='lore-bot') DESC, rowid ASC LIMIT 1",
+                    r => r.GetString(0), ("$s", s)).FirstOrDefault() ?? "";
+            }
+            if (target.Length == 0)
+            {
+                Execute("COMMIT");
+                return;
+            }
+            foreach (string existingKey in Query("SELECT source FROM glossary", r => r.GetString(0)))
+            {
+                if (!string.Equals(existingKey, s, StringComparison.Ordinal)
+                    && string.Equals(existingKey, s, StringComparison.OrdinalIgnoreCase))
+                {
+                    Execute("DELETE FROM glossary WHERE source=$k", ("$k", existingKey));
+                }
+            }
+            Execute("INSERT INTO glossary VALUES($s,$t) ON CONFLICT(source) DO UPDATE SET target=excluded.target",
+                ("$s", s), ("$t", target));
+            Execute("DELETE FROM bot_glossary WHERE source=$s", ("$s", s));
+            Execute("COMMIT");
+        }
+        catch { Execute("ROLLBACK"); throw; }
+    }
+
+    public void SaveBotTerms(IReadOnlyDictionary<string, string> terms, string note = "", bool overwrite = true)
+    {
+        if (terms.Count == 0) return;
+        Execute("BEGIN IMMEDIATE");
+        try
+        {
+            var existing = overwrite ? null : BotGlossary();
+            foreach (var (src, tgt) in terms)
+            {
+                string s = (src ?? "").Trim();
+                string t = (tgt ?? "").Trim();
+                if (s.Length == 0 || t.Length == 0) continue;
+                if (!overwrite && existing != null && existing.ContainsKey(s)) continue;
+                if (overwrite)
+                {
+                    Execute("""
+                        INSERT INTO bot_glossary(source, target, note, updated)
+                        VALUES($s, $t, $n, CURRENT_TIMESTAMP)
+                        ON CONFLICT(source) DO UPDATE SET
+                            target = excluded.target,
+                            note = excluded.note,
+                            updated = CURRENT_TIMESTAMP
+                        """, ("$s", s), ("$t", t), ("$n", note ?? ""));
+                }
+                else
+                {
+                    Execute("""
+                        INSERT INTO bot_glossary(source, target, note, updated)
+                        VALUES($s, $t, $n, CURRENT_TIMESTAMP)
+                        ON CONFLICT(source) DO NOTHING
+                        """, ("$s", s), ("$t", t), ("$n", note ?? ""));
+                    existing?[s] = t;
+                }
+            }
+            Execute("COMMIT");
+        }
+        catch { Execute("ROLLBACK"); throw; }
+    }
+
+    public void ClearBotGlossary() => Execute("DELETE FROM bot_glossary");
+
     public List<Unit> MemoryFor(Unit unit) => Query("""
         SELECT id,path,locator,source,target,context,status,warning,revision,imported FROM units
         WHERE active=1 AND status='approved' AND warning='' AND source=$source AND id<>$id
@@ -516,6 +715,18 @@ public sealed class ProjectStore : IDisposable
     }
     public void Dispose() => connection.Dispose();
 }
+
+public sealed record BotGlossaryEntry(string Source, string Target, string Note, string Updated);
+
+public sealed record RecentProjectSummary(
+    string Path,
+    string Name,
+    string Source,
+    string Engine,
+    int TotalUnits,
+    int CompletedUnits,
+    int ApprovedUnits,
+    bool Exists);
 
 public sealed class EditConflictException(Unit draft, Unit? current)
     : InvalidOperationException($"تغيّر السطر {draft.Locator}. المسودة: {draft.Target} · المحفوظ: {current?.Target ?? "السطر غير متاح"}")

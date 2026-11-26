@@ -189,7 +189,7 @@ public sealed class DatabaseUpgradeAndSearchTests
             db.Open();
             using var cmd = db.CreateCommand();
             cmd.CommandText = "PRAGMA user_version";
-            Assert.Equal(5L, (long)cmd.ExecuteScalar()!);
+            Assert.Equal(6L, (long)cmd.ExecuteScalar()!);
             cmd.CommandText = "SELECT COUNT(*) FROM settings WHERE key LIKE 'translation-team:%' OR key LIKE 'team-active:%'";
             Assert.Equal(0L, (long)cmd.ExecuteScalar()!);
         }
