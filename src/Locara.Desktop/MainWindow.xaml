@@ -26,10 +26,7 @@
       <ColumnDefinition Width="Auto"/>
      </Grid.ColumnDefinitions>
      <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-      <Border Width="36" Height="36" CornerRadius="10" Background="{DynamicResource AccentSoft}" BorderBrush="{DynamicResource AccentIndicator}" BorderThickness="1.2" Margin="0,0,10,0">
-       <Path Data="M 10,8 L 10,21 C 10,24 12,25 15,25 L 23,25 M 16,11 L 24,11 L 19,18 L 24,18"
-             Stroke="{DynamicResource AccentIndicator}" StrokeThickness="2.2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-      </Border>
+      <Image Source="Assets/locara-icon.png" FlowDirection="LeftToRight" Width="38" Height="38" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center" Margin="0,0,10,0"/>
       <StackPanel VerticalAlignment="Center">
        <TextBlock Text="Locara" FontSize="19" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}"/>
        <TextBlock x:Name="ProjectTitle" Text="استوديو التعريب" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextTrimming="CharacterEllipsis" MaxWidth="108"/>

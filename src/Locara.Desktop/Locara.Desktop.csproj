@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="Assets\locara.ico" />
+    <Resource Include="Assets\locara-icon.png" />
   </ItemGroup>
   <ItemGroup><ProjectReference Include="../Locara.Core/Locara.Core.csproj" /></ItemGroup>
 </Project>
