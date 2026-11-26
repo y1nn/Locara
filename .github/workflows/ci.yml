@@ -67,3 +67,93 @@ jobs:
             artifacts/release/*/Locara-windows-x64.zip
             artifacts/release/*/Locara-windows-x64.zip.sha256
           if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build-and-test
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Windows x64 release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Locara-windows-x64
+          path: release-artifacts
+
+      - name: Verify release archive and SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t zip_files < <(find release-artifacts -type f -name 'Locara-windows-x64.zip')
+          mapfile -t sha_files < <(find release-artifacts -type f -name 'Locara-windows-x64.zip.sha256')
+          if [ "${#zip_files[@]}" -ne 1 ] || [ "${#sha_files[@]}" -ne 1 ]; then
+            echo "Expected exactly one zip and one sha256 file in artifact." >&2
+            exit 1
+          fi
+          mkdir -p dist
+          cp "${zip_files[0]}" dist/Locara-windows-x64.zip
+          cp "${sha_files[0]}" dist/Locara-windows-x64.zip.sha256
+          (cd dist && tr -d '\r' < Locara-windows-x64.zip.sha256 | sha256sum -c -)
+          sha_line="$(tr -d '\r\n' < dist/Locara-windows-x64.zip.sha256)"
+          if [[ ! "$sha_line" =~ ^[0-9a-f]{64}\ \ Locara-windows-x64\.zip$ ]]; then
+            echo "Unexpected SHA-256 file format: $sha_line" >&2
+            exit 1
+          fi
+          echo "SHA256_LINE=${sha_line}" >> "$GITHUB_ENV"
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" \
+              dist/Locara-windows-x64.zip \
+              dist/Locara-windows-x64.zip.sha256 \
+              --clobber
+          else
+            read -r -d '' notes_template <<'EOF' || true
+          <div dir="rtl">
+
+          # Locara __TAG__
+
+          إصدار جاهز للتشغيل من Locara لنظام Windows x64.
+
+          ### التشغيل
+          1. نزّل ملف `Locara-windows-x64.zip` وفك الضغط في أي مجلد.
+          2. شغّل `Locara.Desktop.exe` مباشرة (لا يحتاج تثبيت .NET).
+
+          ### التحقق من الملف (SHA-256)
+
+          </div>
+
+          ```text
+          __SHA256__
+          ```
+
+          ---
+
+          **English:** Standalone Windows x64 release of Locara `__TAG__` (includes `Locara.Desktop.exe`, licenses, and the Windows usage guide).
+          EOF
+            notes="${notes_template//__TAG__/$tag}"
+            notes="${notes//__SHA256__/$SHA256_LINE}"
+            printf '%s\n' "$notes" > release-notes.md
+            extra_args=()
+            if [[ "$tag" == *-* ]]; then
+              extra_args+=(--prerelease)
+            fi
+            gh release create "$tag" \
+              dist/Locara-windows-x64.zip \
+              dist/Locara-windows-x64.zip.sha256 \
+              --title "Locara ${tag}" \
+              --notes-file release-notes.md \
+              --generate-notes \
+              --verify-tag \
+              "${extra_args[@]}"
+          fi

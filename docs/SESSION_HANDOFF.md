@@ -1,6 +1,6 @@
 # Locara — Maintainer & Developer Reference
 
-Concise engineering reference for maintaining and extending **Locara** (post-`v1.1.0` baseline, November 2026).
+Concise engineering reference for maintaining and extending **Locara** (`v1.3.0` baseline, November 2026).
 
 ---
 
