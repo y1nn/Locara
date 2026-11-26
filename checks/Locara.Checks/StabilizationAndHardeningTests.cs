@@ -574,4 +574,179 @@ public sealed class StabilizationAndHardeningTests
         Assert.Equal(0, scan.Units);
         Assert.Contains(scan.Diagnostics, d => d.Message.Contains("AES", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void ClassicUnityLocalizationTextShapesArabicWithoutTmpAndProtectsTechnicalMetadataKeys()
+    {
+        using var ws = new TempWorkspace();
+        string gameDir = Directory.CreateDirectory(ws.PathOf("classic-unity-game")).FullName;
+        string dataDir = Directory.CreateDirectory(Path.Combine(gameDir, "ClassicGame_Data")).FullName;
+        string locDir = Directory.CreateDirectory(Path.Combine(dataDir, "Localisation Files")).FullName;
+        File.WriteAllBytes(Path.Combine(dataDir, "globalgamemanagers"), [0, 0, 0, 0]);
+
+        string content =
+            "[Game Language File]\r\n" +
+            "systemLanguage = \"English\"\r\n" +
+            "lang-code = \"en\"\r\n" +
+            "languageName = \"English\"\r\n" +
+            "[Begin Translations]\r\n" +
+            "Culture = \"Culture\"\r\n" +
+            "// Options Header\r\n" +
+            "1 = \"O P T I O N S\"\r\n" +
+            "// VSync Row\r\n" +
+            "2 = \"Vertical Sync (VSYNC)\"\r\n" +
+            "// Long Crossplay Notice\r\n" +
+            "3 = \"Could not join match on this platform! Please ask the host to turn the crossplay setting off in options.\"\r\n";
+        File.WriteAllText(Path.Combine(locDir, "English.txt"), content, System.Text.Encoding.UTF8);
+
+        // Also include a loose INI localization file and a LineByLine .txt file to verify single-line shaping safety
+        File.WriteAllText(Path.Combine(locDir, "Tooltips.ini"),
+            "[UI]\nlong_tip=This tooltip explains how mechanical joints react under heavy structural load during storms.\n",
+            System.Text.Encoding.UTF8);
+        File.WriteAllText(Path.Combine(locDir, "Credits.txt"),
+            "Lead Engineering Team\nSpecial thanks to everyone who tested physics stability across every island region.\n",
+            System.Text.Encoding.UTF8);
+        // Note: ExcludedDocNames excludes "credits", so name the line-by-line localization file "Dialogs.txt"
+        File.Delete(Path.Combine(locDir, "Credits.txt"));
+        File.WriteAllText(Path.Combine(locDir, "Dialogs.txt"),
+            "Welcome Traveler\nSpecial thanks to everyone who tested physics stability across every island region.\n",
+            System.Text.Encoding.UTF8);
+
+        using var store = ProjectStore.Create(ws.PathOf("classic-unity-proj"), "ClassicUnity", gameDir);
+        var svc = new ProjectService(store);
+        svc.Scan();
+
+        // 1. Technical header keys (systemLanguage, lang-code) must never be extracted, while gameplay "Culture" & UI "roomCode" stay safe
+        var scannedUnits = store.Units();
+        Assert.DoesNotContain(scannedUnits, u => u.Locator.Contains("systemLanguage", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(scannedUnits, u => u.Locator.Contains("lang-code", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(scannedUnits, u => u.Source == "Culture");
+        Assert.Equal(FieldSemanticHint.LikelyTechnical, FieldSemantics.ClassifyFieldKey("[UI/Menu]systemLanguage#2"));
+        Assert.Equal(FieldSemanticHint.LikelyTechnical, FieldSemantics.ClassifyFieldKey("localeCode"));
+        Assert.Equal(FieldSemanticHint.Neutral, FieldSemantics.ClassifyFieldKey("[Begin Translations]3"));
+        Assert.Equal(FieldSemanticHint.Neutral, FieldSemantics.ClassifyFieldKey("roomCode"));
+        Assert.Equal(FieldSemanticHint.Neutral, FieldSemantics.ClassifyFieldKey("decode"));
+
+        // Simulate legacy project DB that already stored an approved translation for [Game Language File]systemLanguage before this fix
+        store.Execute("""
+            INSERT INTO units(id,path,locator,source,target,context,status,warning,revision,imported,active)
+            VALUES('legacy-syslang','ClassicGame_Data/Localisation Files/English.txt','[Game Language File]systemLanguage','English','Arabic','header','approved','',1,'',1)
+            """);
+
+        var opt = store.Units("O P T I O N S").Single();
+        opt.Target = "الخيارات";
+        store.Save(opt, approve: true);
+
+        var vsync = store.Units("Vertical Sync (VSYNC)").Single();
+        vsync.Target = "المزامنة الرأسية (VSYNC)";
+        store.Save(vsync, approve: true);
+
+        var longMsg = store.Units().Single(u => u.Locator == "[Begin Translations]3");
+        longMsg.Target = "تعذّر الانضمام للمباراة على هذا النظام! يرجى الطلب من المضيف إيقاف خيار اللعب المشترك من الإعدادات.";
+        store.Save(longMsg, approve: true);
+
+        const string longArabicSingleLine = "يوضح هذا التلميح كيف تتفاعل المفاصل الميكانيكية تحت الأحمال الثقيلة أثناء العواصف القوية جداً.";
+        var iniUnit = store.Units().Single(u => u.Path.EndsWith("Tooltips.ini", StringComparison.Ordinal));
+        iniUnit.Target = longArabicSingleLine;
+        store.Save(iniUnit, approve: true);
+
+        var lineByLineUnit = store.Units().Single(u => u.Path.EndsWith("Dialogs.txt", StringComparison.Ordinal) && u.Locator == "line:2");
+        lineByLineUnit.Target = longArabicSingleLine;
+        store.Save(lineByLineUnit, approve: true);
+
+        // 2. Default ShapeArabic = true must shape Arabic into Presentation Forms-B even without TMP or loose .ttf
+        var preview = svc.Preview(final: true);
+        Assert.Equal(3, preview.ChangedFiles.Count);
+        var built = svc.Build(ws.PathOf("classic-unity-out"), final: true, reviewed: preview);
+        string rebuilt = File.ReadAllText(
+            Path.Combine(built.Directory, "resources/ClassicGame_Data/Localisation Files/English.txt"),
+            System.Text.Encoding.UTF8);
+
+        // systemLanguage must stay "English" even when legacy DB had an approved "Arabic" row
+        Assert.Contains("systemLanguage = \"English\"", rebuilt);
+        Assert.DoesNotContain("systemLanguage = \"Arabic\"", rebuilt);
+
+        // Arabic text must be visually shaped (Presentation Forms-B), NOT raw logical U+06xx
+        Assert.Contains($"1 = \"{ArabicTextEngine.Shape("الخيارات")}\"", rebuilt);
+        // 24-char single-line UI menu label must NOT have a forced \n line break injected!
+        Assert.Contains($"2 = \"{ArabicTextEngine.Shape("المزامنة الرأسية (VSYNC)")}\"", rebuilt);
+        // >75-char multi-sentence quoted message wraps cleanly with escaped \n inside the quoted value
+        Assert.Contains("\\n", rebuilt.Split('\n').Single(l => l.StartsWith("3 = ", StringComparison.Ordinal)));
+
+        // INI and LineByLine .txt must keep exact single-line shaping without crashing or reversing clause order!
+        string rebuiltIni = File.ReadAllText(
+            Path.Combine(built.Directory, "resources/ClassicGame_Data/Localisation Files/Tooltips.ini"),
+            System.Text.Encoding.UTF8);
+        Assert.Contains(ArabicTextEngine.Shape(longArabicSingleLine), rebuiltIni);
+        string rebuiltDialogs = File.ReadAllText(
+            Path.Combine(built.Directory, "resources/ClassicGame_Data/Localisation Files/Dialogs.txt"),
+            System.Text.Encoding.UTF8);
+        Assert.Contains(ArabicTextEngine.Shape(longArabicSingleLine), rebuiltDialogs);
+
+        // 3. Disabling shaping (unity_arabic_shaping = 0) writes logical UTF-8 Arabic and updates fingerprint
+        store.Set("unity_arabic_shaping", "0");
+        var rtlPreview = svc.Preview(final: true);
+        Assert.NotEqual(preview.Fingerprint, rtlPreview.Fingerprint);
+        var rtlBuilt = svc.Build(ws.PathOf("classic-unity-rtl-out"), final: true, reviewed: rtlPreview);
+        string rtlRebuilt = File.ReadAllText(
+            Path.Combine(rtlBuilt.Directory, "resources/ClassicGame_Data/Localisation Files/English.txt"),
+            System.Text.Encoding.UTF8);
+        Assert.Contains("1 = \"الخيارات\"", rtlRebuilt);
+        Assert.Contains("systemLanguage = \"English\"", rtlRebuilt);
+    }
+
+    [Fact]
+    public void MutatedOrDeletedUntranslatedSidecarConfigDoesNotBlockBuildWhileTranslatedFileStillGuardsHash()
+    {
+        using var ws = new TempWorkspace();
+        string gameDir = Directory.CreateDirectory(ws.PathOf("sidecar-config-game")).FullName;
+        string dataDir = Directory.CreateDirectory(Path.Combine(gameDir, "ClassicGame_Data")).FullName;
+        string locDir = Directory.CreateDirectory(Path.Combine(dataDir, "Localisation Files")).FullName;
+        File.WriteAllBytes(Path.Combine(dataDir, "globalgamemanagers"), [0, 0, 0, 0]);
+
+        string enPath = Path.Combine(locDir, "English.txt");
+        string frPath = Path.Combine(locDir, "French.txt");
+        string configXml = Path.Combine(dataDir, "Config.xml");
+        string controlsXml = Path.Combine(dataDir, "Controls.xml");
+
+        string enOriginal = string.Join("\r\n", Enumerable.Range(1, 10).Select(i => $"{i} = \"Menu Option Number {i}\"")) + "\r\n";
+        File.WriteAllText(enPath, enOriginal, System.Text.Encoding.UTF8);
+        File.WriteAllText(frPath, "1 = \"Option 1\"\r\n", System.Text.Encoding.UTF8);
+        File.WriteAllText(configXml, "<Config><Language>English</Language><Volume>100</Volume></Config>", System.Text.Encoding.UTF8);
+        File.WriteAllText(controlsXml, "<Controls><Jump>Space</Jump></Controls>", System.Text.Encoding.UTF8);
+
+        using var store = ProjectStore.Create(ws.PathOf("sidecar-proj"), "SidecarGame", gameDir);
+        var svc = new ProjectService(store);
+        svc.Scan();
+
+        var first = store.Units().Single(u => u.Source == "Menu Option Number 1");
+        first.Target = "خيار القائمة الأول";
+        store.Save(first, approve: true);
+
+        // Simulate launching the game: game rewrites Config.xml and removes temp Controls.xml
+        const string updatedConfig = "<Config><Language>Custom</Language><Volume>55</Volume></Config>";
+        File.WriteAllText(configXml, updatedConfig, System.Text.Encoding.UTF8);
+        File.Delete(controlsXml);
+
+        // 1. Preview, full-tree Build (overlayOnly: false), and DeployInPlace must all succeed without false hash error!
+        var preview = svc.Preview(final: true);
+        Assert.Equal(["ClassicGame_Data/Localisation Files/English.txt"], preview.ChangedFiles);
+
+        var fullBuild = svc.Build(ws.PathOf("sidecar-full-out"), final: true, reviewed: preview, overlayOnly: false);
+        Assert.True(File.Exists(Path.Combine(fullBuild.Directory, "resources/ClassicGame_Data/Config.xml")));
+
+        var deployed = PackageInstaller.DeployInPlace(store, ws.PathOf("sidecar-deploy-out"), final: true);
+        Assert.Equal(1, deployed.Install.Files);
+        Assert.Equal(updatedConfig, File.ReadAllText(configXml, System.Text.Encoding.UTF8));
+
+        PackageInstaller.RestoreInPlace(store);
+        Assert.Equal(enOriginal, File.ReadAllText(enPath, System.Text.Encoding.UTF8));
+        Assert.Equal(updatedConfig, File.ReadAllText(configXml, System.Text.Encoding.UTF8));
+
+        // 2. Modifying the ACTUALLY translated localization file on disk MUST still throw hash mismatch!
+        File.WriteAllText(enPath, enOriginal + "11 = \"External Patch Line\"\r\n", System.Text.Encoding.UTF8);
+        var mismatch = Assert.Throws<InvalidOperationException>(() => svc.Preview(final: true));
+        Assert.Contains("تغير المورد منذ الفحص", mismatch.Message);
+        Assert.Contains("English.txt", mismatch.Message);
+    }
 }
