@@ -34,9 +34,9 @@ public partial class MainWindow
         }
     }
 
-    private sealed record TokenChipItem(string Token, string Label, Brush StatusBrush);
+    private sealed record TokenChipItem(string Token, string Label, bool IsSatisfied);
 
-    private sealed record NeighborRowItem(string Source, string TargetPreview, Brush RowBg, Brush RowFg);
+    private sealed record NeighborRowItem(string Source, string TargetPreview, bool IsCurrent);
 
     private readonly ObservableCollection<LiveSampleItem> liveSamples = [];
     private readonly ObservableCollection<BotTermRow> botTermRows = [];
@@ -49,6 +49,8 @@ public partial class MainWindow
     private void InitializeStudioShell()
     {
         ThemeManager.AttachWindow(this);
+        ThemeManager.ThemeChanged += OnStudioThemeChanged;
+        Closed += (_, _) => ThemeManager.ThemeChanged -= OnStudioThemeChanged;
         LiveTranslationFeed.ItemsSource = liveSamples;
         BotTermsList.ItemsSource = botTermRows;
         UpdateThemeToggleVisual();
@@ -56,21 +58,34 @@ public partial class MainWindow
         UpdateBudgetCapBadge();
     }
 
+    private void OnStudioThemeChanged(bool _)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => OnStudioThemeChanged(ThemeManager.IsDark));
+            return;
+        }
+        UpdateThemeToggleVisual();
+        RefreshScannedFiles();
+        RefreshDirectInstallStatus();
+    }
+
     private void UpdateThemeToggleVisual()
     {
         if (ThemeToggleButton == null) return;
-        ThemeToggleButton.Content = ThemeManager.IsDark ? "☀ فاتح" : "☾ داكن";
-        ThemeToggleButton.ToolTip = ThemeManager.IsDark ? "التبديل إلى المظهر الفاتح" : "التبديل إلى المظهر الداكن";
+        bool isDark = ThemeManager.IsDark;
+        if (ThemeToggleText != null)
+            ThemeToggleText.Text = isDark ? "فاتح" : "داكن";
+        if (ThemeSunIcon != null)
+            ThemeSunIcon.Visibility = isDark ? Visibility.Visible : Visibility.Collapsed;
+        if (ThemeMoonIcon != null)
+            ThemeMoonIcon.Visibility = isDark ? Visibility.Collapsed : Visibility.Visible;
+        ThemeToggleButton.ToolTip = isDark ? "التبديل إلى المظهر الفاتح" : "التبديل إلى المظهر الداكن";
     }
 
     private void ToggleThemeClick(object sender, RoutedEventArgs e)
     {
         ThemeManager.ToggleTheme();
-        UpdateThemeToggleVisual();
-        RefreshScannedFiles();
-        RefreshDirectInstallStatus();
-        if (Rows.SelectedItem is Unit selected)
-            PopulateEditorInspector(selected);
     }
 
     private void NavLibraryClick(object sender, RoutedEventArgs e) => SelectStage(LibraryPage);
@@ -104,6 +119,12 @@ public partial class MainWindow
 
         bool showHeader = projectPath != null && current != LibraryPage;
         ProjectCommandBar.Visibility = showHeader ? Visibility.Visible : Visibility.Collapsed;
+
+        if (current == TranslationPage && BotTabLive?.IsChecked != true && BotTabLore?.IsChecked != true && BotTabSections?.IsChecked != true && BotTabLive != null)
+            BotTabLive.IsChecked = true;
+        if (current == SettingsPage && SettingsTabApi?.IsChecked != true && SettingsTabRouting?.IsChecked != true && SettingsTabUsage?.IsChecked != true && SettingsTabApi != null)
+            SettingsTabApi.IsChecked = true;
+
         SyncSettingsProjectScope();
         UpdateHeaderPrimaryVisibility();
     }
@@ -129,6 +150,17 @@ public partial class MainWindow
             || (current == PackagesPage && nextAction is NextAction.Deploy or NextAction.Trial);
 
         Primary.Visibility = ownedByCurrentStage ? Visibility.Collapsed : Visibility.Visible;
+
+        bool stageHasOwnPrimaryCta =
+            (current == FilesPage && ContinueToBotsBtn?.Visibility == Visibility.Visible)
+            || current == TranslationPage
+            || current == EditorPage
+            || current == PackagesPage
+            || current == SettingsPage;
+
+        string targetStyleKey = stageHasOwnPrimaryCta ? "OutlineAccentButtonStyle" : "PrimaryButtonStyle";
+        if (TryFindResource(targetStyleKey) is Style targetStyle)
+            Primary.Style = targetStyle;
     }
 
     private void SyncSettingsProjectScope()
@@ -408,11 +440,7 @@ public partial class MainWindow
                     if (i != idx && !string.Equals(u.Path, row.Path, StringComparison.Ordinal)) continue;
                     bool isCurrent = i == idx;
                     string tgt = string.IsNullOrWhiteSpace(u.Target) ? "(بانتظار الترجمة)" : u.Target;
-                    neighbors.Add(new NeighborRowItem(
-                        u.Source,
-                        tgt,
-                        ResBrush(isCurrent ? "AccentSoft" : "BgElevated"),
-                        ResBrush(isCurrent ? "AccentIndicator" : "TextSecondary")));
+                    neighbors.Add(new NeighborRowItem(u.Source, tgt, isCurrent));
                 }
             }
             InspectorNeighborsList.ItemsSource = neighbors;
@@ -435,8 +463,7 @@ public partial class MainWindow
             var chips = inspections.Select(t =>
             {
                 string countBadge = t.ExpectedCount > 1 ? $" ({t.PresentCount}/{t.ExpectedCount})" : (t.IsSatisfied ? " ✓" : "");
-                Brush fg = ResBrush(t.IsSatisfied ? "SuccessFg" : "WarningFg");
-                return new TokenChipItem(t.Token, t.Token + countBadge, fg);
+                return new TokenChipItem(t.Token, t.Token + countBadge, t.IsSatisfied);
             }).ToList();
             InspectorTokensList.ItemsSource = chips;
 

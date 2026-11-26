@@ -44,71 +44,71 @@ internal static class ThemeManager
         {
             if (dark)
             {
-                SetBrush(res, "BgCanvas", "#0C1113");
-                SetBrush(res, "BgSidebar", "#080C0E");
-                SetBrush(res, "BgSurface", "#121A1D");
-                SetBrush(res, "BgSubtle", "#0F1619");
-                SetBrush(res, "BgElevated", "#192328");
-                SetBrush(res, "BgHover", "#212E34");
-                SetBrush(res, "BgInput", "#0E1518");
-                SetBrush(res, "BorderSubtle", "#223036");
-                SetBrush(res, "CardBorder", "#223036");
-                SetBrush(res, "BorderStrong", "#324750");
-                SetBrush(res, "TextPrimary", "#ECF3F1");
-                SetBrush(res, "Ink", "#ECF3F1");
-                SetBrush(res, "TextSecondary", "#96AAAF");
-                SetBrush(res, "TextMuted", "#667B81");
+                SetBrush(res, "BgCanvas", "#0B1014");
+                SetBrush(res, "BgSidebar", "#070B0E");
+                SetBrush(res, "BgSurface", "#121A20");
+                SetBrush(res, "BgSubtle", "#0E151A");
+                SetBrush(res, "BgElevated", "#1A242C");
+                SetBrush(res, "BgHover", "#23313C");
+                SetBrush(res, "BgInput", "#0B1116");
+                SetBrush(res, "BorderSubtle", "#263642");
+                SetBrush(res, "CardBorder", "#263642");
+                SetBrush(res, "BorderStrong", "#394F60");
+                SetBrush(res, "TextPrimary", "#F0F6F5");
+                SetBrush(res, "Ink", "#F0F6F5");
+                SetBrush(res, "TextSecondary", "#A8BDC4");
+                SetBrush(res, "TextMuted", "#7E969F");
 
                 // Targeted Locara Jade (10% focal rule)
-                SetBrush(res, "Accent", "#129674");
-                SetBrush(res, "AccentHover", "#16B089");
-                SetBrush(res, "AccentSoft", "#132C25");
-                SetBrush(res, "AccentIndicator", "#24CA98");
+                SetBrush(res, "Accent", "#109876");
+                SetBrush(res, "AccentHover", "#15B58D");
+                SetBrush(res, "AccentSoft", "#112F27");
+                SetBrush(res, "AccentIndicator", "#2AD4A2");
                 SetBrush(res, "OnAccent", "#FFFFFF");
 
-                SetBrush(res, "SuccessFg", "#28CE9B");
-                SetBrush(res, "SuccessBg", "#112922");
-                SetBrush(res, "WarningFg", "#EAA83B");
-                SetBrush(res, "WarningBg", "#2A2010");
-                SetBrush(res, "Danger", "#D94848");
-                SetBrush(res, "DangerFg", "#F06A6A");
-                SetBrush(res, "DangerBg", "#2B1517");
-                SetBrush(res, "InfoFg", "#47BDF8");
-                SetBrush(res, "InfoBg", "#112430");
+                SetBrush(res, "SuccessFg", "#2ED6A3");
+                SetBrush(res, "SuccessBg", "#0F2D24");
+                SetBrush(res, "WarningFg", "#F2B441");
+                SetBrush(res, "WarningBg", "#2E220E");
+                SetBrush(res, "Danger", "#D94646");
+                SetBrush(res, "DangerFg", "#F47272");
+                SetBrush(res, "DangerBg", "#2F1417");
+                SetBrush(res, "InfoFg", "#4DC3FA");
+                SetBrush(res, "InfoBg", "#0F2533");
             }
             else
             {
-                SetBrush(res, "BgCanvas", "#F3F6F5");
-                SetBrush(res, "BgSidebar", "#E8EFED");
+                SetBrush(res, "BgCanvas", "#E7EEEC");
+                SetBrush(res, "BgSidebar", "#DCE6E4");
                 SetBrush(res, "BgSurface", "#FFFFFF");
-                SetBrush(res, "BgSubtle", "#F7FAF9");
-                SetBrush(res, "BgElevated", "#EDF3F1");
-                SetBrush(res, "BgHover", "#E1ECE9");
+                SetBrush(res, "BgSubtle", "#F4F8F7");
+                SetBrush(res, "BgElevated", "#E4ECEA");
+                SetBrush(res, "BgHover", "#D4E2DF");
                 SetBrush(res, "BgInput", "#FFFFFF");
-                SetBrush(res, "BorderSubtle", "#D4E0DC");
-                SetBrush(res, "CardBorder", "#D4E0DC");
-                SetBrush(res, "BorderStrong", "#B3C7C1");
-                SetBrush(res, "TextPrimary", "#102125");
-                SetBrush(res, "Ink", "#102125");
-                SetBrush(res, "TextSecondary", "#486167");
-                SetBrush(res, "TextMuted", "#6D8489");
+                SetBrush(res, "BorderSubtle", "#C2D2CE");
+                SetBrush(res, "CardBorder", "#C2D2CE");
+                SetBrush(res, "BorderStrong", "#98B0AB");
+                SetBrush(res, "TextPrimary", "#0D1C20");
+                SetBrush(res, "Ink", "#0D1C20");
+                SetBrush(res, "TextSecondary", "#364F56");
+                SetBrush(res, "TextMuted", "#536C73");
 
                 // Targeted Deep Jade for Light Mode
-                SetBrush(res, "Accent", "#0E7A5F");
-                SetBrush(res, "AccentHover", "#0B634D");
-                SetBrush(res, "AccentSoft", "#DCF0E9");
-                SetBrush(res, "AccentIndicator", "#0E7A5F");
+                SetBrush(res, "Accent", "#0B7C60");
+                SetBrush(res, "AccentHover", "#09664F");
+                SetBrush(res, "AccentSoft", "#CFECE3");
+                SetBrush(res, "AccentIndicator", "#096951");
                 SetBrush(res, "OnAccent", "#FFFFFF");
 
-                SetBrush(res, "SuccessFg", "#0D6E55");
-                SetBrush(res, "SuccessBg", "#E3F5EF");
-                SetBrush(res, "WarningFg", "#945D00");
-                SetBrush(res, "WarningBg", "#FFF6E0");
-                SetBrush(res, "Danger", "#C0392B");
-                SetBrush(res, "DangerFg", "#B83232");
-                SetBrush(res, "DangerBg", "#FDECEC");
-                SetBrush(res, "InfoFg", "#0369A1");
-                SetBrush(res, "InfoBg", "#E6F4FE");
+                SetBrush(res, "SuccessFg", "#0B6B52");
+                SetBrush(res, "SuccessBg", "#D7F2E9");
+                SetBrush(res, "WarningFg", "#8F5700");
+                SetBrush(res, "WarningBg", "#FFF0CE");
+                SetBrush(res, "Danger", "#C0362C");
+                SetBrush(res, "DangerFg", "#B22828");
+                SetBrush(res, "DangerBg", "#FCE4E4");
+                SetBrush(res, "InfoFg", "#036296");
+                SetBrush(res, "InfoBg", "#DCEFFC");
             }
 
             // Override SystemColors inside App resources so native popups/menus never render white-on-white

@@ -10,7 +10,7 @@
 
  <Grid Background="{DynamicResource BgCanvas}" TextElement.Foreground="{DynamicResource TextPrimary}">
   <Grid.ColumnDefinitions>
-   <ColumnDefinition Width="238"/>
+   <ColumnDefinition Width="248"/>
    <ColumnDefinition Width="*"/>
   </Grid.ColumnDefinitions>
 
@@ -19,35 +19,43 @@
    <DockPanel LastChildFill="True">
 
     <!-- Brand Identity & Theme Toggle (In RTL Grid: Col 0 = Physical Right, Col 1 = Physical Left) -->
-    <Grid DockPanel.Dock="Top" Margin="2,0,2,14">
+    <Grid DockPanel.Dock="Top" Margin="2,0,2,16">
      <Grid.ColumnDefinitions>
       <ColumnDefinition Width="*"/>
       <ColumnDefinition Width="Auto"/>
      </Grid.ColumnDefinitions>
      <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-      <Border Width="34" Height="34" CornerRadius="9" Background="{DynamicResource AccentSoft}" BorderBrush="{DynamicResource AccentIndicator}" BorderThickness="1" Margin="0,0,10,0">
+      <Border Width="36" Height="36" CornerRadius="10" Background="{DynamicResource AccentSoft}" BorderBrush="{DynamicResource AccentIndicator}" BorderThickness="1.2" Margin="0,0,10,0">
        <Path Data="M 10,8 L 10,21 C 10,24 12,25 15,25 L 23,25 M 16,11 L 24,11 L 19,18 L 24,18"
              Stroke="{DynamicResource AccentIndicator}" StrokeThickness="2.2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center"/>
       </Border>
       <StackPanel VerticalAlignment="Center">
        <TextBlock Text="Locara" FontSize="19" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}"/>
-       <TextBlock x:Name="ProjectTitle" Text="استوديو التعريب" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextTrimming="CharacterEllipsis" MaxWidth="118"/>
+       <TextBlock x:Name="ProjectTitle" Text="استوديو التعريب" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextTrimming="CharacterEllipsis" MaxWidth="108"/>
       </StackPanel>
      </StackPanel>
-     <Button x:Name="ThemeToggleButton" Grid.Column="1" Click="ToggleThemeClick" Style="{StaticResource GhostButtonStyle}" Padding="8,5" Margin="0" VerticalAlignment="Center" FontSize="11.5" ToolTip="تبديل المظهر الداكن / الفاتح" Content="☀ فاتح"/>
+     <Button x:Name="ThemeToggleButton" Grid.Column="1" Click="ToggleThemeClick" Background="{DynamicResource BgElevated}" BorderBrush="{DynamicResource BorderSubtle}" Padding="9,5" Margin="0" VerticalAlignment="Center" FontSize="11.5" ToolTip="تبديل المظهر الداكن / الفاتح">
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+       <Path x:Name="ThemeSunIcon" Width="13" Height="13" Stretch="Uniform" Margin="0,0,5,0" VerticalAlignment="Center" Stroke="{DynamicResource AccentIndicator}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+             Data="M12,7 A5,5 0 1 0 12,17 A5,5 0 1 0 12,7 M12,2 L12,4 M12,20 L12,22 M4.93,4.93 L6.34,6.34 M17.66,17.66 L19.07,19.07 M2,12 L4,12 M20,12 L22,12 M4.93,19.07 L6.34,17.66 M17.66,6.34 L19.07,4.93"/>
+       <Path x:Name="ThemeMoonIcon" Width="12" Height="12" Stretch="Uniform" Margin="0,0,5,0" VerticalAlignment="Center" Visibility="Collapsed" Stroke="{DynamicResource AccentIndicator}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+             Data="M21,12.79 A9,9 0 1 1 11.21,3 A7,7 0 0 0 21,12.79 Z"/>
+       <TextBlock x:Name="ThemeToggleText" Text="فاتح" VerticalAlignment="Center" Foreground="{DynamicResource TextPrimary}" FontWeight="SemiBold"/>
+      </StackPanel>
+     </Button>
     </Grid>
 
     <!-- Quick Project Open/New Buttons -->
-    <UniformGrid DockPanel.Dock="Top" Columns="2" Margin="0,0,0,12">
-     <Button x:Name="HeaderNewButton" Content="+ مشروع جديد" Click="CreateProject" FontSize="12" Padding="8,7" Margin="0,0,3,0"/>
-     <Button x:Name="HeaderOpenButton" Content="فتح مشروع" Click="OpenProject" FontSize="12" Padding="8,7" Margin="3,0,0,0"/>
+    <UniformGrid DockPanel.Dock="Top" Columns="2" Margin="0,0,0,14">
+     <Button x:Name="HeaderNewButton" Content="+ مشروع جديد" Click="CreateProject" FontSize="12" Padding="8,7" Margin="0,0,4,0"/>
+     <Button x:Name="HeaderOpenButton" Content="فتح مشروع" Click="OpenProject" FontSize="12" Padding="8,7" Margin="4,0,0,0"/>
     </UniformGrid>
 
     <!-- Home / Library Nav -->
     <RadioButton x:Name="NavLibrary" DockPanel.Dock="Top" GroupName="StudioNav" Style="{StaticResource RailNavRadioStyle}" IsChecked="True" Click="NavLibraryClick" Content="مكتبتي والمشاريع"/>
 
     <!-- Pipeline Divider -->
-    <TextBlock DockPanel.Dock="Top" Text="مراحل التعريب" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextMuted}" Margin="8,14,8,6"/>
+    <TextBlock DockPanel.Dock="Top" Text="مراحل التعريب" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextMuted}" Margin="10,16,10,6"/>
 
     <!-- 4 Focused Workflow Stages -->
     <StackPanel DockPanel.Dock="Top">
@@ -59,8 +67,14 @@
 
     <!-- Bottom Settings & API Footer -->
     <StackPanel DockPanel.Dock="Bottom">
-     <Border Height="1" Background="{DynamicResource BorderSubtle}" Margin="4,8"/>
-     <RadioButton x:Name="NavSettings" GroupName="StudioNav" Style="{StaticResource RailNavRadioStyle}" Click="NavSettingsClick" Content="⚙ الإعدادات ومفاتيح API"/>
+     <Border Height="1" Background="{DynamicResource BorderSubtle}" Margin="4,10"/>
+     <RadioButton x:Name="NavSettings" GroupName="StudioNav" Style="{StaticResource RailNavRadioStyle}" Click="NavSettingsClick">
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+       <Path Width="14" Height="14" Stretch="Uniform" Margin="0,0,8,0" VerticalAlignment="Center" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+             Data="M12,9 A3,3 0 1 0 12,15 A3,3 0 1 0 12,9 M19.4,15 A1.65,1.65 0 0 0 19.73,16.82 L19.79,16.88 A2,2 0 1 1 16.96,19.71 L16.9,19.65 A1.65,1.65 0 0 0 15.08,19.32 A1.65,1.65 0 0 0 14.08,20.83 L14.08,21 A2,2 0 1 1 10.08,21 L10.08,20.91 A1.65,1.65 0 0 0 9,19.4 A1.65,1.65 0 0 0 7.18,19.73 L7.12,19.79 A2,2 0 1 1 4.29,16.96 L4.35,16.9 A1.65,1.65 0 0 0 4.68,15.08 A1.65,1.65 0 0 0 3.17,14.08 L3,14.08 A2,2 0 1 1 3,10.08 L3.09,10.08 A1.65,1.65 0 0 0 4.6,9 A1.65,1.65 0 0 0 4.27,7.18 L4.21,7.12 A2,2 0 1 1 7.04,4.29 L7.1,4.35 A1.65,1.65 0 0 0 8.92,4.68 L9,4.68 A1.65,1.65 0 0 0 10,3.17 L10,3 A2,2 0 1 1 14,3 L14,3.09 A1.65,1.65 0 0 0 15,4.6 A1.65,1.65 0 0 0 16.82,4.27 L16.88,4.21 A2,2 0 1 1 19.71,7.04 L19.65,7.1 A1.65,1.65 0 0 0 19.32,8.92 L19.32,9 A1.65,1.65 0 0 0 20.83,10 L21,10 A2,2 0 1 1 21,14 L20.91,14 A1.65,1.65 0 0 0 19.4,15 Z"/>
+       <TextBlock Text="الإعدادات ومفاتيح API" VerticalAlignment="Center"/>
+      </StackPanel>
+     </RadioButton>
     </StackPanel>
 
     <Border/>
@@ -76,7 +90,7 @@
    </Grid.RowDefinitions>
 
    <!-- Persistent Project Command Bar (Visible whenever a project is open & not on Library) -->
-   <Border x:Name="ProjectCommandBar" Grid.Row="0" Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,0,0,1" Padding="20,12" Visibility="Collapsed">
+   <Border x:Name="ProjectCommandBar" Grid.Row="0" Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,0,0,1" Padding="22,12" Visibility="Collapsed">
     <Grid>
      <Grid.ColumnDefinitions>
       <ColumnDefinition Width="Auto"/>
@@ -85,42 +99,42 @@
      </Grid.ColumnDefinitions>
 
      <!-- Right: Game Title & Engine Pill -->
-     <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,18,0" MaxWidth="340">
+     <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,22,0" MaxWidth="340">
       <WrapPanel VerticalAlignment="Center">
-       <TextBlock x:Name="DashboardName" FontSize="18" FontWeight="Bold" TextTrimming="CharacterEllipsis" MaxWidth="240" VerticalAlignment="Center" Margin="0,0,8,0"/>
-       <Border Background="{DynamicResource AccentSoft}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="6" Padding="8,2" VerticalAlignment="Center">
-        <TextBlock x:Name="EngineSummary" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}"/>
+       <TextBlock x:Name="DashboardName" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" TextTrimming="CharacterEllipsis" MaxWidth="235" VerticalAlignment="Center" Margin="0,0,8,0"/>
+       <Border Background="{DynamicResource AccentSoft}" BorderBrush="{DynamicResource AccentIndicator}" BorderThickness="1" CornerRadius="6" Padding="8,2" VerticalAlignment="Center">
+        <TextBlock x:Name="EngineSummary" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}"/>
        </Border>
       </WrapPanel>
-      <TextBlock x:Name="ScanSummary" FontSize="12" Foreground="{DynamicResource TextSecondary}" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+      <TextBlock x:Name="ScanSummary" FontSize="12" Foreground="{DynamicResource TextSecondary}" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
       <TextBlock x:Name="DeploymentSummary" Visibility="Collapsed"/>
       <TextBlock x:Name="OutputSummary" Visibility="Collapsed"/>
       <TextBlock x:Name="OverviewTeam" Visibility="Collapsed"/>
      </StackPanel>
 
      <!-- Center: Progress Bar & Clickable Quick Filter Pills -->
-     <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,0,16,0" MaxWidth="520">
+     <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,0,20,0" MaxWidth="540" HorizontalAlignment="Stretch">
       <Grid Margin="0,0,0,5">
        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-       <TextBlock Grid.Column="0" Text="تقدّم التعريب" FontSize="11.5" Foreground="{DynamicResource TextSecondary}"/>
-       <TextBlock Grid.Column="1" x:Name="ApprovalPercent" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}"/>
+       <TextBlock Grid.Column="0" Text="تقدّم التعريب" FontSize="11.5" FontWeight="Medium" Foreground="{DynamicResource TextSecondary}"/>
+       <TextBlock Grid.Column="1" x:Name="ApprovalPercent" FontSize="11.5" FontWeight="Bold" Foreground="{DynamicResource AccentIndicator}"/>
       </Grid>
-      <ProgressBar x:Name="ApprovalProgress" Height="6" Margin="0,0,0,7" AutomationProperties.Name="نسبة الاعتماد"/>
+      <ProgressBar x:Name="ApprovalProgress" Height="7" Margin="0,0,0,8" AutomationProperties.Name="نسبة الاعتماد"/>
       <WrapPanel>
-       <Button x:Name="PendingCount" Tag="pending" Click="OpenStatus" Style="{StaticResource GhostButtonStyle}" FontSize="11.5" Padding="8,3" Margin="0,0,4,0"/>
-       <Button x:Name="DraftCount" Tag="review" Click="OpenStatus" Style="{StaticResource GhostButtonStyle}" FontSize="11.5" Padding="8,3" Margin="0,0,4,0" Foreground="{DynamicResource WarningFg}"/>
-       <Button x:Name="IssueCount" Tag="issues" Click="OpenStatus" Style="{StaticResource GhostButtonStyle}" FontSize="11.5" Padding="8,3" Margin="0,0,4,0" Foreground="{DynamicResource DangerFg}"/>
-       <Button x:Name="ApprovedCount" Tag="approved" Click="OpenStatus" Style="{StaticResource GhostButtonStyle}" FontSize="11.5" Padding="8,3" Margin="0" Foreground="{DynamicResource SuccessFg}"/>
+       <Button x:Name="PendingCount" Tag="pending" Click="OpenStatus" Style="{StaticResource StatusPillButtonStyle}"/>
+       <Button x:Name="DraftCount" Tag="review" Click="OpenStatus" Style="{StaticResource StatusPillButtonStyle}" Background="{DynamicResource WarningBg}" Foreground="{DynamicResource WarningFg}"/>
+       <Button x:Name="IssueCount" Tag="issues" Click="OpenStatus" Style="{StaticResource StatusPillButtonStyle}" Background="{DynamicResource DangerBg}" Foreground="{DynamicResource DangerFg}"/>
+       <Button x:Name="ApprovedCount" Tag="approved" Click="OpenStatus" Style="{StaticResource StatusPillButtonStyle}" Background="{DynamicResource SuccessBg}" Foreground="{DynamicResource SuccessFg}" Margin="0"/>
       </WrapPanel>
      </StackPanel>
 
-     <!-- Left: Single Cross-Stage Primary CTA + Stop Button -->
+     <!-- Left: Single Cross-Stage CTA + Stop Button -->
      <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-      <Button x:Name="DashboardTrial" Content="جرّب اللعبة" Click="TryGame" Visibility="Collapsed" Padding="12,8"/>
+      <Button x:Name="DashboardTrial" Content="جرّب اللعبة" Click="TryGame" Visibility="Collapsed" Padding="13,8"/>
       <Button x:Name="DashboardPreview" Content="بناء معاينة" Click="PreviewFromProject" Visibility="Collapsed"/>
       <Button x:Name="OpenLatest" Content="فتح الناتج" Click="OpenOutput" Visibility="Collapsed"/>
-      <Button x:Name="Primary" Click="PrimaryAction" Style="{StaticResource PrimaryButtonStyle}"/>
-      <Button x:Name="HeaderCancelButton" Content="إيقاف العملية" Click="CancelWork" Style="{StaticResource DangerButtonStyle}" Visibility="{Binding Visibility, ElementName=Busy}"/>
+      <Button x:Name="Primary" Click="PrimaryAction" Style="{StaticResource PrimaryButtonStyle}" Margin="0,0,6,0"/>
+      <Button x:Name="HeaderCancelButton" Content="إيقاف العملية" Click="CancelWork" Style="{StaticResource DangerButtonStyle}" Visibility="{Binding Visibility, ElementName=Busy}" Margin="0"/>
      </StackPanel>
     </Grid>
    </Border>
@@ -136,7 +150,7 @@
     <!-- ==================== VIEW 0: LIBRARY & START ==================== -->
     <TabItem x:Name="LibraryPage" Header="مكتبتي">
      <ScrollViewer VerticalScrollBarVisibility="Auto">
-      <StackPanel Margin="28,24" MaxWidth="980" HorizontalAlignment="Stretch">
+      <StackPanel Margin="26,22" MaxWidth="1440" HorizontalAlignment="Stretch">
 
        <!-- Interactive Drop Zone Hero Card -->
        <Border x:Name="DropZoneBorder" Style="{StaticResource CardBorderStyle}" Padding="26,24" AllowDrop="True" PreviewDragOver="SourceDragOver" DragLeave="SourceDragLeave" Drop="DropSource">
@@ -145,9 +159,12 @@
           <ColumnDefinition Width="*"/>
           <ColumnDefinition Width="Auto"/>
          </Grid.ColumnDefinitions>
-         <StackPanel Grid.Column="0" VerticalAlignment="Center">
-          <TextBlock Text="ابدأ مشروع تعريب جديد" FontSize="24" FontWeight="Bold"/>
-          <TextBlock Text="اختر لعبتك المثبّتة من مكتبة Steam بضغطة واحدة، أو اسحب مجلد اللعبة أو ملف اللغة وأفلته هنا مباشرة." Foreground="{DynamicResource TextSecondary}" FontSize="13.5" TextWrapping="Wrap" Margin="0,6,0,16"/>
+         <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,20,0">
+          <Border Background="{DynamicResource AccentSoft}" BorderBrush="{DynamicResource AccentIndicator}" BorderThickness="1" CornerRadius="6" Padding="9,3" HorizontalAlignment="Left" Margin="0,0,0,10">
+           <TextBlock Text="استوديو تعريب الألعاب الذكي" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}"/>
+          </Border>
+          <TextBlock Text="ابدأ مشروع تعريب جديد" FontSize="25" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}"/>
+          <TextBlock Text="اختر لعبتك المثبّتة من مكتبة Steam بضغطة واحدة، أو اسحب مجلد اللعبة أو ملف اللغة وأفلته هنا مباشرة." Foreground="{DynamicResource TextSecondary}" FontSize="13.5" TextWrapping="Wrap" Margin="0,6,0,18"/>
           <WrapPanel>
            <Button Content="اختيار من مكتبة Steam" Click="StartSteamSource" Style="{StaticResource PrimaryButtonStyle}"/>
            <Button Content="اختيار مجلد لعبة" Click="StartGame"/>
@@ -155,51 +172,56 @@
            <Button Content="مجلد حفظ المشاريع" Click="ChooseWorkspace" Style="{StaticResource GhostButtonStyle}"/>
           </WrapPanel>
          </StackPanel>
-         <Border Grid.Column="1" Width="88" Height="88" CornerRadius="16" Background="{DynamicResource BgElevated}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" Margin="18,0,0,0" VerticalAlignment="Center">
+         <Border Grid.Column="1" Width="116" Height="104" CornerRadius="14" Background="{DynamicResource BgSubtle}" BorderBrush="{DynamicResource BorderStrong}" BorderThickness="1.5" VerticalAlignment="Center">
           <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-           <TextBlock Text="⬇" FontSize="28" Foreground="{DynamicResource AccentIndicator}" HorizontalAlignment="Center"/>
-           <TextBlock Text="إفلات سريع" FontSize="11" Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+           <Border Width="42" Height="42" CornerRadius="11" Background="{DynamicResource AccentSoft}" HorizontalAlignment="Center" Margin="0,0,0,7">
+            <Path Width="20" Height="20" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" Stroke="{DynamicResource AccentIndicator}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                  Data="M12,3 L12,15 M7,10 L12,15 L17,10 M4,17 L4,19 C4,20.1 4.9,21 6,21 L18,21 C19.1,21 20,20.1 20,19 L20,17"/>
+           </Border>
+           <TextBlock Text="إفلات سريع" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" HorizontalAlignment="Center"/>
           </StackPanel>
          </Border>
         </Grid>
        </Border>
 
        <!-- Rich Recent Projects Section -->
-       <Grid Margin="2,22,2,10">
+       <Grid Margin="2,24,2,10">
         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-        <TextBlock Grid.Column="0" Text="مشاريعك الأخيرة" FontSize="17" FontWeight="SemiBold"/>
+        <TextBlock Grid.Column="0" Text="مشاريعك الأخيرة" FontSize="17.5" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}"/>
         <TextBlock Grid.Column="1" x:Name="RecentEmptyHint" Text="لا توجد مشاريع سابقة بعد — ابدأ باختيار لعبة من الأعلى." FontSize="12.5" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center" Visibility="Collapsed"/>
        </Grid>
 
-       <ListBox x:Name="RecentProjects" Background="Transparent" BorderThickness="0" Padding="0" MouseDoubleClick="OpenRecent" KeyDown="RecentKey" AutomationProperties.Name="المشاريع الأخيرة">
+       <ListBox x:Name="RecentProjects" Background="Transparent" BorderThickness="0" Padding="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled" MouseDoubleClick="OpenRecent" KeyDown="RecentKey" AutomationProperties.Name="المشاريع الأخيرة">
         <ListBox.ItemTemplate>
          <DataTemplate>
-          <Border Style="{StaticResource CardBorderStyle}" Padding="16,13" Margin="0,4">
+          <Border Style="{StaticResource CardBorderStyle}" Padding="18,14" Margin="0,4">
            <Grid>
             <Grid.ColumnDefinitions>
              <ColumnDefinition Width="*"/>
-             <ColumnDefinition Width="235"/>
+             <ColumnDefinition Width="250"/>
              <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
-            <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,14,0">
+            <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,16,0">
              <WrapPanel VerticalAlignment="Center">
-              <TextBlock Text="{Binding Name}" FontSize="15.5" FontWeight="Bold" Margin="0,0,8,0"/>
-              <Border Background="{DynamicResource BgElevated}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="5" Padding="7,1" VerticalAlignment="Center">
+              <TextBlock Text="{Binding Name}" FontSize="15.5" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" Margin="0,0,8,0"/>
+              <Border Background="{DynamicResource AccentSoft}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="5" Padding="8,1.5" VerticalAlignment="Center">
                <TextBlock Text="{Binding EngineBadge}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}"/>
               </Border>
              </WrapPanel>
-             <TextBlock Text="{Binding SourceDisplay}" FlowDirection="LeftToRight" TextAlignment="Right" FontFamily="{StaticResource MonoFont}" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextTrimming="CharacterEllipsis" Margin="0,4,0,0" ToolTip="{Binding Path}"/>
+             <TextBlock Text="{Binding SourceDisplay}" FlowDirection="LeftToRight" TextAlignment="Right" FontFamily="{StaticResource MonoFont}" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextTrimming="CharacterEllipsis" Margin="0,5,0,0" ToolTip="{Binding Path}"/>
             </StackPanel>
 
-            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,14,0">
-             <TextBlock Text="{Binding StatsText}" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,5"/>
-             <ProgressBar Value="{Binding ProgressPercent, Mode=OneWay}" Minimum="0" Maximum="100" Height="5"/>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,18,0">
+             <TextBlock Text="{Binding StatsText}" FontSize="12" FontWeight="Medium" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,6"/>
+             <ProgressBar Value="{Binding ProgressPercent, Mode=OneWay}" Minimum="0" Maximum="100" Height="6"/>
             </StackPanel>
 
             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-             <Button Content="فتح المشروع ←" Tag="{Binding Path}" Click="OpenRecentCardClick" Padding="13,7"/>
-             <Button Content="✕" Tag="{Binding Path}" Click="RemoveRecentCardClick" Style="{StaticResource GhostButtonStyle}" Padding="8,6" Margin="0" ToolTip="إزالة من القائمة الأخيرة"/>
+             <Button Content="فتح المشروع ←" Tag="{Binding Path}" Click="OpenRecentCardClick" Padding="14,8" Margin="0,0,6,0"/>
+             <Button Tag="{Binding Path}" Click="RemoveRecentCardClick" Style="{StaticResource GhostButtonStyle}" Width="32" Height="32" Padding="0" Margin="0" ToolTip="إزالة من القائمة الأخيرة">
+              <Path Width="11" Height="11" Stretch="Uniform" Stroke="{DynamicResource TextSecondary}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M2,2 L10,10 M10,2 L2,10"/>
+             </Button>
             </StackPanel>
            </Grid>
           </Border>
@@ -329,7 +351,7 @@
          </ComboBox>
         </Grid>
 
-        <DataGrid Grid.Row="2" x:Name="ScannedFilesGrid" AutoGenerateColumns="False" CanUserAddRows="False" SelectionMode="Single" RowHeight="36" FontSize="12.5" SelectionChanged="SelectScannedFileRow">
+        <DataGrid Grid.Row="2" x:Name="ScannedFilesGrid" AutoGenerateColumns="False" CanUserAddRows="False" SelectionMode="Single" RowHeight="38" FontSize="12.5" SelectionChanged="SelectScannedFileRow">
          <DataGrid.Columns>
           <DataGridTemplateColumn Header="تضمين" Width="62">
            <DataGridTemplateColumn.CellTemplate>
@@ -349,12 +371,33 @@
             </Style>
            </DataGridTextColumn.ElementStyle>
           </DataGridTextColumn>
-          <DataGridTextColumn Header="الصيغة" Binding="{Binding Format}" IsReadOnly="True" Width="80"/>
-          <DataGridTextColumn Header="النصوص" Binding="{Binding UnitsSummary}" IsReadOnly="True" Width="125"/>
-          <DataGridTemplateColumn Header="التصنيف الذكي" IsReadOnly="True" Width="148">
+          <DataGridTextColumn Header="الصيغة" Binding="{Binding Format}" IsReadOnly="True" Width="88">
+           <DataGridTextColumn.ElementStyle>
+            <Style TargetType="TextBlock">
+             <Setter Property="FlowDirection" Value="LeftToRight"/>
+             <Setter Property="VerticalAlignment" Value="Center"/>
+             <Setter Property="HorizontalAlignment" Value="Center"/>
+             <Setter Property="FontFamily" Value="{StaticResource MonoFont}"/>
+             <Setter Property="FontSize" Value="11.5"/>
+             <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+            </Style>
+           </DataGridTextColumn.ElementStyle>
+          </DataGridTextColumn>
+          <DataGridTextColumn Header="النصوص" Binding="{Binding UnitsSummary}" IsReadOnly="True" Width="130">
+           <DataGridTextColumn.ElementStyle>
+            <Style TargetType="TextBlock">
+             <Setter Property="VerticalAlignment" Value="Center"/>
+             <Setter Property="Padding" Value="8,0"/>
+             <Setter Property="FontWeight" Value="Medium"/>
+            </Style>
+           </DataGridTextColumn.ElementStyle>
+          </DataGridTextColumn>
+          <DataGridTemplateColumn Header="التصنيف الذكي" IsReadOnly="True" Width="162">
            <DataGridTemplateColumn.CellTemplate>
             <DataTemplate>
-             <TextBlock Text="{Binding VerdictLabel}" Foreground="{Binding VerdictBrush}" FontWeight="SemiBold" VerticalAlignment="Center" Padding="6,0" ToolTip="{Binding Reason}"/>
+             <Border Background="{DynamicResource BgElevated}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="6" Padding="8,2.5" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="6,0" ToolTip="{Binding Reason}">
+              <TextBlock Text="{Binding VerdictLabel}" Foreground="{Binding VerdictBrush}" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+             </Border>
             </DataTemplate>
            </DataGridTemplateColumn.CellTemplate>
           </DataGridTemplateColumn>
@@ -397,46 +440,61 @@
     <!-- ==================== STAGE 2: LIVE 3-BOT STUDIO ==================== -->
     <TabItem x:Name="TranslationPage" Header="البوتات والترجمة" IsEnabled="False">
      <ScrollViewer VerticalScrollBarVisibility="Auto">
-      <StackPanel Margin="22,16" MaxWidth="1140" HorizontalAlignment="Stretch">
+      <StackPanel Margin="22,16" MaxWidth="1480" HorizontalAlignment="Stretch">
 
-       <!-- Top Launch & Mode Card (Zero Clutter) -->
-       <Border Style="{StaticResource CardBorderStyle}" Padding="18,16">
+       <!-- Top Launch & Mode Card (Edge-to-Edge Balanced Controls) -->
+       <Border Style="{StaticResource CardBorderStyle}" Padding="18,14">
         <StackPanel>
          <Grid Margin="0,0,0,10">
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-          <StackPanel Grid.Column="0" Margin="0,0,12,0">
-           <TextBlock Text="غرفة البوتات الذكية المترابطة" FontSize="20" FontWeight="Bold"/>
-           <TextBlock x:Name="TranslationFilesGuardText" FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+          <StackPanel Grid.Column="0" Margin="0,0,14,0">
+           <TextBlock Text="غرفة البوتات الذكية المترابطة" FontSize="20" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}"/>
+           <TextBlock x:Name="TranslationFilesGuardText" FontSize="12.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,3,0,0"/>
           </StackPanel>
           <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-           <Button x:Name="ProviderSummaryBtn" Click="ToggleConnectionPanel" Padding="12,6" ToolTip="انقر لضبط اتصال الـ API والنموذج">
+           <Button x:Name="ProviderSummaryBtn" Click="ToggleConnectionPanel" Padding="12,7" ToolTip="انقر لضبط اتصال الـ API والنموذج">
             <TextBlock x:Name="ProviderSummary" FontSize="12" Foreground="{DynamicResource AccentIndicator}" FontWeight="SemiBold" MaxWidth="360" TextTrimming="CharacterEllipsis"/>
            </Button>
-           <Button Content="توجيه البوتات ⚙" Click="ToggleRoutingPanel" Style="{StaticResource GhostButtonStyle}" Margin="0"/>
+           <Button Click="ToggleRoutingPanel" Style="{StaticResource GhostButtonStyle}" Margin="0" Padding="11,7">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+             <Path Width="13" Height="13" Stretch="Uniform" Margin="0,0,6,0" VerticalAlignment="Center" Stroke="{DynamicResource TextSecondary}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                   Data="M4,6 L20,6 M4,12 L20,12 M4,18 L20,18 M9,4 L9,8 M15,10 L15,14 M11,16 L11,20"/>
+             <TextBlock Text="توجيه البوتات" VerticalAlignment="Center"/>
+            </StackPanel>
+           </Button>
           </StackPanel>
          </Grid>
 
          <StackPanel x:Name="TranslationControlsPanel">
-          <WrapPanel Margin="0,2,0,8">
-           <StackPanel Margin="0,0,12,4">
-            <TextBlock Text="النطاق المستهدف" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,3"/>
-            <ComboBox x:Name="TranslationMode" Width="255" SelectedIndex="0" SelectedValuePath="Tag">
+          <Grid Margin="0,2,0,10">
+           <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="1.15*"/>
+            <ColumnDefinition Width="12"/>
+            <ColumnDefinition Width="1.5*"/>
+            <ColumnDefinition Width="12"/>
+            <ColumnDefinition Width="0.72*"/>
+            <ColumnDefinition Width="12"/>
+            <ColumnDefinition Width="0.78*"/>
+           </Grid.ColumnDefinitions>
+           <StackPanel Grid.Column="0">
+            <TextBlock Text="النطاق المستهدف" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,4"/>
+            <ComboBox x:Name="TranslationMode" SelectedIndex="0" SelectedValuePath="Tag">
              <ComboBoxItem Content="كل النصوص المتبقية في المشروع" Tag="all-pending"/>
              <ComboBoxItem Content="مراجعة المسودات بالذكاء الاصطناعي" Tag="review-drafts"/>
              <ComboBoxItem Content="النطاق المفلتر حالياً في المحرّر" Tag="editor-scope"/>
             </ComboBox>
            </StackPanel>
-           <StackPanel Margin="0,0,12,4">
-            <TextBlock Text="نظام التشغيل" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,3"/>
-            <ComboBox x:Name="SpeedMode" Width="315" SelectedIndex="0" SelectedValuePath="Tag">
+           <StackPanel Grid.Column="2">
+            <TextBlock Text="نظام التشغيل" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,4"/>
+            <ComboBox x:Name="SpeedMode" SelectedIndex="0" SelectedValuePath="Tag">
              <ComboBoxItem Content="بوتات ذكية مترابطة (موصى به — سياق + مسرد حي)" Tag="smart"/>
              <ComboBoxItem Content="مراجعة شاملة (مترجم + مدقق لكل سطر)" Tag="team"/>
              <ComboBoxItem Content="وضع سريع (ترجمة متسلسلة + فحص محلي)" Tag="fast"/>
             </ComboBox>
            </StackPanel>
-           <StackPanel Margin="0,0,12,4">
-            <TextBlock Text="البوتات المتوازية" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,3"/>
-            <ComboBox x:Name="WorkersCount" Width="175" SelectedIndex="2" SelectedValuePath="Tag" SelectionChanged="WorkersCountChanged">
+           <StackPanel Grid.Column="4">
+            <TextBlock Text="البوتات المتوازية" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,4"/>
+            <ComboBox x:Name="WorkersCount" SelectedIndex="2" SelectedValuePath="Tag" SelectionChanged="WorkersCountChanged">
              <ComboBoxItem Content="1 بوت" Tag="1"/>
              <ComboBoxItem Content="2 بوتان" Tag="2"/>
              <ComboBoxItem Content="4 بوتات (موصى)" Tag="4"/>
@@ -446,18 +504,18 @@
              <ComboBoxItem Content="16 بوتاً (أقصى)" Tag="16"/>
             </ComboBox>
            </StackPanel>
-           <StackPanel Margin="0,0,0,4">
-            <TextBlock Text="حجم الدفعة" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,3"/>
-            <ComboBox x:Name="BatchSizeChoice" Width="180" SelectedIndex="1" SelectedValuePath="Tag">
+           <StackPanel Grid.Column="6">
+            <TextBlock Text="حجم الدفعة" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,4"/>
+            <ComboBox x:Name="BatchSizeChoice" SelectedIndex="1" SelectedValuePath="Tag">
              <ComboBoxItem Content="15 نصاً / دفعة" Tag="15"/>
              <ComboBoxItem Content="30 نصاً / دفعة (موصى)" Tag="30"/>
              <ComboBoxItem Content="45 نصاً / دفعة" Tag="45"/>
              <ComboBoxItem Content="60 نصاً / دفعة" Tag="60"/>
             </ComboBox>
            </StackPanel>
-          </WrapPanel>
+          </Grid>
 
-          <Grid Margin="0,2,0,8">
+          <Grid Margin="0,2,0,10">
            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
            <CheckBox Grid.Column="0" x:Name="AutoApproveReviewed" IsChecked="True" Content="اعتماد الترجمات المدققة تلقائياً فور حفظها"/>
            <TextBlock Grid.Column="1" x:Name="BudgetCapBadge" Text="" FontSize="12" Foreground="{DynamicResource WarningFg}" VerticalAlignment="Center" Visibility="Collapsed"/>
@@ -476,12 +534,12 @@
        </Border>
 
        <!-- Interactive 3-Bot Pipeline Telemetry Card -->
-       <Border x:Name="LiveMonitorCard" Style="{StaticResource CardBorderStyle}" Padding="18,16" Margin="0,12,0,0">
+       <Border x:Name="LiveMonitorCard" Style="{StaticResource CardBorderStyle}" Padding="18,14" Margin="0,10,0,0">
         <StackPanel>
          <Grid Margin="0,0,0,10">
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <StackPanel Grid.Column="0">
-           <TextBlock x:Name="LiveMonitorTitle" Text="خلية البوتات وحالة الجلسة" FontSize="17" FontWeight="Bold"/>
+           <TextBlock x:Name="LiveMonitorTitle" Text="خلية البوتات وحالة الجلسة" FontSize="17" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}"/>
            <TextBlock x:Name="SavedTeamSummary" FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,2,0,0"/>
           </StackPanel>
           <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -492,16 +550,19 @@
          </Grid>
 
          <!-- 3 Specialized Bot Cards -->
-         <UniformGrid Columns="3" Margin="0,0,0,12">
+         <UniformGrid Columns="3" Margin="0,0,0,10">
           <!-- Bot 1: Lore & Glossary Bot -->
           <Border x:Name="LoreBotCard" Style="{StaticResource SubtleCardBorderStyle}" Margin="0,0,6,0" Cursor="Hand" MouseLeftButtonUp="OpenLoreSubTabClick" ToolTip="انقر لعرض بطاقة عالم اللعبة والمسرد المكتشف">
            <StackPanel>
             <Grid>
-             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-             <TextBlock Grid.Column="0" Text="1. بوت الكشّاف والعالم" FontWeight="Bold" FontSize="13.5"/>
-             <TextBlock Grid.Column="1" x:Name="LoreBotBadge" Text="في الانتظار" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+             <Border Grid.Column="0" Width="22" Height="22" CornerRadius="6" Background="{DynamicResource AccentSoft}" Margin="0,0,8,0" VerticalAlignment="Center">
+              <TextBlock Text="1" FontSize="11.5" FontWeight="Bold" Foreground="{DynamicResource AccentIndicator}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+             </Border>
+             <TextBlock Grid.Column="1" Text="بوت الكشّاف والعالم" FontWeight="Bold" FontSize="13.5" VerticalAlignment="Center"/>
+             <TextBlock Grid.Column="2" x:Name="LoreBotBadge" Text="في الانتظار" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
             </Grid>
-            <TextBlock x:Name="LoreBotDetail" Text="يبني بطاقة عالم اللعبة ويكتشف الأسماء والمصطلحات تلقائياً" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,5,0,0"/>
+            <TextBlock x:Name="LoreBotDetail" Text="يبني بطاقة عالم اللعبة ويكتشف الأسماء والمصطلحات تلقائياً" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,6,0,0"/>
            </StackPanel>
           </Border>
 
@@ -509,11 +570,14 @@
           <Border Style="{StaticResource SubtleCardBorderStyle}" Margin="3,0">
            <StackPanel>
             <Grid>
-             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-             <TextBlock Grid.Column="0" Text="2. بوتات المشاهد المتسلسلة" FontWeight="Bold" FontSize="13.5"/>
-             <TextBlock Grid.Column="1" x:Name="LiveActiveAgentsText" Text="0" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource AccentIndicator}" VerticalAlignment="Center"/>
+             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+             <Border Grid.Column="0" Width="22" Height="22" CornerRadius="6" Background="{DynamicResource AccentSoft}" Margin="0,0,8,0" VerticalAlignment="Center">
+              <TextBlock Text="2" FontSize="11.5" FontWeight="Bold" Foreground="{DynamicResource AccentIndicator}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+             </Border>
+             <TextBlock Grid.Column="1" Text="بوتات المشاهد المتسلسلة" FontWeight="Bold" FontSize="13.5" VerticalAlignment="Center"/>
+             <TextBlock Grid.Column="2" x:Name="LiveActiveAgentsText" Text="0" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource AccentIndicator}" VerticalAlignment="Center"/>
             </Grid>
-            <TextBlock Text="جلسات محادثة متصلة بذاكرة سياق متحركة ومشاركة مصطلحات حية" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,5,0,0"/>
+            <TextBlock Text="جلسات محادثة متصلة بذاكرة سياق متحركة ومشاركة مصطلحات حية" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,6,0,0"/>
            </StackPanel>
           </Border>
 
@@ -521,49 +585,52 @@
           <Border Style="{StaticResource SubtleCardBorderStyle}" Margin="6,0,0,0">
            <StackPanel>
             <Grid>
-             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-             <TextBlock Grid.Column="0" Text="3. بوت المدقق السياقي" FontWeight="Bold" FontSize="13.5"/>
-             <TextBlock Grid.Column="1" x:Name="LiveModeBadge" Text="في وضع الانتظار" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}" VerticalAlignment="Center"/>
+             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+             <Border Grid.Column="0" Width="22" Height="22" CornerRadius="6" Background="{DynamicResource AccentSoft}" Margin="0,0,8,0" VerticalAlignment="Center">
+              <TextBlock Text="3" FontSize="11.5" FontWeight="Bold" Foreground="{DynamicResource AccentIndicator}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+             </Border>
+             <TextBlock Grid.Column="1" Text="بوت المدقق السياقي" FontWeight="Bold" FontSize="13.5" VerticalAlignment="Center"/>
+             <TextBlock Grid.Column="2" x:Name="LiveModeBadge" Text="في وضع الانتظار" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}" VerticalAlignment="Center"/>
             </Grid>
-            <TextBlock x:Name="LiveNotesCountText" Text="يتخطّى الأزرار السليمة ويركّز على تدقيق الحوارات والسرد" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,5,0,0"/>
+            <TextBlock x:Name="LiveNotesCountText" Text="يتخطّى الأزرار السليمة ويركّز على تدقيق الحوارات والسرد" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,6,0,0"/>
            </StackPanel>
           </Border>
          </UniformGrid>
 
          <!-- Progress & 4 KPI Metrics -->
-         <Grid Margin="0,0,0,5">
+         <Grid Margin="0,0,0,6">
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <TextBlock Grid.Column="0" x:Name="LiveProgressText" Text="جاهز للتشغيل" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}"/>
           <TextBlock Grid.Column="1" x:Name="LiveEtaText" Text="" FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
          </Grid>
          <ProgressBar x:Name="LiveProgressBar" Height="8" Minimum="0" Maximum="100" Value="0"/>
 
-         <UniformGrid Columns="4" Margin="0,12,0,12">
+         <UniformGrid Columns="4" Margin="0,10,0,10">
           <Border Style="{StaticResource SubtleCardBorderStyle}" Margin="0,0,5,0">
            <StackPanel>
             <TextBlock Text="التوكنز (الجلسة)" FontSize="11.5" Foreground="{DynamicResource TextSecondary}"/>
-            <TextBlock x:Name="LiveTokensTotal" Text="0" FontSize="18" FontWeight="Bold" Margin="0,2,0,0"/>
+            <TextBlock x:Name="LiveTokensTotal" Text="0" FontSize="19" FontWeight="Bold" Margin="0,3,0,0"/>
             <TextBlock x:Name="LiveTokensBreakdown" Text="دخل: 0 · خرج: 0" FontSize="11" Foreground="{DynamicResource TextMuted}" TextTrimming="CharacterEllipsis"/>
            </StackPanel>
           </Border>
           <Border Style="{StaticResource SubtleCardBorderStyle}" Margin="3,0">
            <StackPanel>
             <TextBlock Text="السرعة والطلبات" FontSize="11.5" Foreground="{DynamicResource TextSecondary}"/>
-            <TextBlock x:Name="LiveSpeedText" Text="—" FontSize="18" FontWeight="Bold" Margin="0,2,0,0"/>
+            <TextBlock x:Name="LiveSpeedText" Text="—" FontSize="19" FontWeight="Bold" Margin="0,3,0,0"/>
             <TextBlock x:Name="LiveRequestsText" Text="0 طلب" FontSize="11" Foreground="{DynamicResource TextMuted}"/>
            </StackPanel>
           </Border>
           <Border Style="{StaticResource SubtleCardBorderStyle}" Margin="3,0">
            <StackPanel>
             <TextBlock Text="الترجمات المحفوظة" FontSize="11.5" Foreground="{DynamicResource TextSecondary}"/>
-            <TextBlock x:Name="LiveSavedText" Text="0" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource SuccessFg}" Margin="0,2,0,0"/>
+            <TextBlock x:Name="LiveSavedText" Text="0" FontSize="19" FontWeight="Bold" Foreground="{DynamicResource SuccessFg}" Margin="0,3,0,0"/>
             <TextBlock Text="تُحفظ أولاً بأول في المشروع" FontSize="11" Foreground="{DynamicResource TextMuted}"/>
            </StackPanel>
           </Border>
           <Border x:Name="OverviewUsageCard" Style="{StaticResource SubtleCardBorderStyle}" Margin="5,0,0,0" Cursor="Hand" MouseLeftButtonUp="OpenUsagePanel" ToolTip="انقر لفتح سجل الاستهلاك وأسعار النماذج">
            <StackPanel>
             <TextBlock Text="تكلفة المشروع التراكمية" FontSize="11.5" Foreground="{DynamicResource TextSecondary}"/>
-            <TextBlock x:Name="OverviewTotalCost" Text="$0.00" FlowDirection="LeftToRight" HorizontalAlignment="Left" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource AccentIndicator}" Margin="0,2,0,0"/>
+            <TextBlock x:Name="OverviewTotalCost" Text="$0.00" FlowDirection="LeftToRight" HorizontalAlignment="Left" FontSize="19" FontWeight="Bold" Foreground="{DynamicResource AccentIndicator}" Margin="0,3,0,0"/>
             <TextBlock x:Name="OverviewTotalRequests" Text="0 طلب مسجّل" FontSize="11" Foreground="{DynamicResource TextMuted}" TextTrimming="CharacterEllipsis"/>
             <TextBlock x:Name="OverviewTotalTokens" Visibility="Collapsed"/>
             <TextBlock x:Name="OverviewTokensBreakdown" Visibility="Collapsed"/>
@@ -572,7 +639,7 @@
          </UniformGrid>
 
          <!-- Segmented Sub-View Switcher (Left in RTL = Physical Right!) -->
-         <Border Background="{DynamicResource BgSubtle}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="9" Padding="4" HorizontalAlignment="Left" Margin="0,0,0,10">
+         <Border Background="{DynamicResource BgSubtle}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="9" Padding="4" HorizontalAlignment="Left" Margin="0,0,0,12">
           <WrapPanel>
            <RadioButton x:Name="BotTabLive" GroupName="BotSubTabs" Style="{StaticResource SegmentedRadioStyle}" IsChecked="True" Checked="BotSubTabChanged" Content="البث الحي ومسارات البوتات"/>
            <RadioButton x:Name="BotTabLore" GroupName="BotSubTabs" Style="{StaticResource SegmentedRadioStyle}" Checked="BotSubTabChanged" Content="عالم اللعبة والمسرد الحي"/>
@@ -583,44 +650,82 @@
          <!-- SUB-VIEW 1: Live Lanes + Live Translated Stream -->
          <Grid x:Name="BotLiveSubPanel">
           <Grid.ColumnDefinitions>
-           <ColumnDefinition Width="1.25*"/>
-           <ColumnDefinition Width="12"/>
+           <ColumnDefinition Width="1.3*"/>
+           <ColumnDefinition Width="14"/>
            <ColumnDefinition Width="*"/>
           </Grid.ColumnDefinitions>
 
           <StackPanel Grid.Column="0">
            <TextBlock Text="مسارات البوتات النشطة" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,6"/>
-           <DataGrid x:Name="AgentsGrid" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" RowHeight="34" MaxHeight="250" FontSize="12.5">
-            <DataGrid.Columns>
-             <DataGridTextColumn Header="البوت" Binding="{Binding AgentName}" Width="88"/>
-             <DataGridTextColumn Header="الدور" Binding="{Binding Role}" Width="118"/>
-             <DataGridTextColumn Header="النموذج" Binding="{Binding ModelLabel}" Width="140">
-              <DataGridTextColumn.ElementStyle>
-               <Style TargetType="TextBlock">
-                <Setter Property="FlowDirection" Value="LeftToRight"/>
-                <Setter Property="VerticalAlignment" Value="Center"/>
-                <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
-                <Setter Property="Foreground" Value="{DynamicResource AccentIndicator}"/>
-                <Setter Property="Padding" Value="6,0"/>
-               </Style>
-              </DataGridTextColumn.ElementStyle>
-             </DataGridTextColumn>
-             <DataGridTextColumn Header="الحالة" Binding="{Binding Stage}" Width="74"/>
-             <DataGridTextColumn Header="دفعة" Binding="{Binding BatchLabel}" Width="58"/>
-             <DataGridTextColumn Header="منجز" Binding="{Binding CompletedCount}" Width="58"/>
-             <DataGridTextColumn Header="التفاصيل" Binding="{Binding Detail}" Width="*"/>
-            </DataGrid.Columns>
-           </DataGrid>
+           <Grid MinHeight="210">
+            <DataGrid x:Name="AgentsGrid" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" RowHeight="34" MinHeight="210" MaxHeight="260" FontSize="12.5">
+             <DataGrid.Columns>
+              <DataGridTextColumn Header="البوت" Binding="{Binding AgentName}" Width="88">
+               <DataGridTextColumn.ElementStyle>
+                <Style TargetType="TextBlock"><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="Padding" Value="6,0"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+               </DataGridTextColumn.ElementStyle>
+              </DataGridTextColumn>
+              <DataGridTextColumn Header="الدور" Binding="{Binding Role}" Width="118">
+               <DataGridTextColumn.ElementStyle>
+                <Style TargetType="TextBlock"><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="Padding" Value="6,0"/></Style>
+               </DataGridTextColumn.ElementStyle>
+              </DataGridTextColumn>
+              <DataGridTextColumn Header="النموذج" Binding="{Binding ModelLabel}" Width="145">
+               <DataGridTextColumn.ElementStyle>
+                <Style TargetType="TextBlock">
+                 <Setter Property="FlowDirection" Value="LeftToRight"/>
+                 <Setter Property="VerticalAlignment" Value="Center"/>
+                 <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                 <Setter Property="Foreground" Value="{DynamicResource AccentIndicator}"/>
+                 <Setter Property="Padding" Value="6,0"/>
+                </Style>
+               </DataGridTextColumn.ElementStyle>
+              </DataGridTextColumn>
+              <DataGridTextColumn Header="الحالة" Binding="{Binding Stage}" Width="76">
+               <DataGridTextColumn.ElementStyle>
+                <Style TargetType="TextBlock"><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="Padding" Value="6,0"/></Style>
+               </DataGridTextColumn.ElementStyle>
+              </DataGridTextColumn>
+              <DataGridTextColumn Header="دفعة" Binding="{Binding BatchLabel}" Width="58">
+               <DataGridTextColumn.ElementStyle>
+                <Style TargetType="TextBlock"><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="HorizontalAlignment" Value="Center"/></Style>
+               </DataGridTextColumn.ElementStyle>
+              </DataGridTextColumn>
+              <DataGridTextColumn Header="منجز" Binding="{Binding CompletedCount}" Width="58">
+               <DataGridTextColumn.ElementStyle>
+                <Style TargetType="TextBlock"><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="HorizontalAlignment" Value="Center"/></Style>
+               </DataGridTextColumn.ElementStyle>
+              </DataGridTextColumn>
+              <DataGridTextColumn Header="التفاصيل" Binding="{Binding Detail}" Width="*">
+               <DataGridTextColumn.ElementStyle>
+                <Style TargetType="TextBlock"><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="TextTrimming" Value="CharacterEllipsis"/><Setter Property="Padding" Value="6,0"/><Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/></Style>
+               </DataGridTextColumn.ElementStyle>
+              </DataGridTextColumn>
+             </DataGrid.Columns>
+            </DataGrid>
+            <TextBlock Text="اضغط «تشغيل البوتات الآن» لمتابعة مسارات البوتات النشطة هنا لحظياً." FontSize="12.5" Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="18,34,18,0" IsHitTestVisible="False">
+             <TextBlock.Style>
+              <Style TargetType="TextBlock">
+               <Setter Property="Visibility" Value="Collapsed"/>
+               <Style.Triggers>
+                <DataTrigger Binding="{Binding HasItems, ElementName=AgentsGrid}" Value="False">
+                 <Setter Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+               </Style.Triggers>
+              </Style>
+             </TextBlock.Style>
+            </TextBlock>
+           </Grid>
 
-           <Expander x:Name="ActivityFeedExpander" Header="سجل أحداث البوتات المباشر" IsExpanded="False" Margin="0,8,0,0">
+           <Expander x:Name="ActivityFeedExpander" Header="سجل أحداث البوتات المباشر" IsExpanded="False" Margin="0,10,0,0">
             <ListBox x:Name="ActivityLog" MaxHeight="140" BorderThickness="0" FontSize="11.5"/>
            </Expander>
           </StackPanel>
 
-          <Border Grid.Column="2" Style="{StaticResource SubtleCardBorderStyle}" Padding="12">
+          <Border Grid.Column="2" Style="{StaticResource SubtleCardBorderStyle}" Padding="14,12" MinHeight="210" VerticalAlignment="Stretch">
            <StackPanel>
-            <TextBlock Text="آخر النصوص المعرّبة حياً" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource AccentIndicator}" Margin="0,0,0,4"/>
-            <TextBlock x:Name="LiveSamplesEmptyText" Text="ستظهر هنا عينات حية من جمل اللعبة فور تعريبها أثناء عمل البوتات." FontSize="12" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" Margin="0,4"/>
+            <TextBlock Text="آخر النصوص المعرّبة حياً" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource AccentIndicator}" Margin="0,0,0,6"/>
+            <TextBlock x:Name="LiveSamplesEmptyText" Text="ستظهر هنا عينات حية من جمل اللعبة فور تعريبها أثناء عمل البوتات." FontSize="12" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" Margin="0,6"/>
             <ItemsControl x:Name="LiveTranslationFeed" MaxHeight="260">
              <ItemsControl.Template>
               <ControlTemplate TargetType="ItemsControl">
@@ -670,7 +775,7 @@
               <Button Grid.Column="1" x:Name="ClearBotTermsBtn" Content="مسح التلقائي" Click="ClearBotGlossaryClick" Style="{StaticResource GhostButtonStyle}" FontSize="11.5" Padding="8,3" Margin="0"/>
              </Grid>
              <TextBlock x:Name="BotTermsEmptyText" Text="لم تُسجّل مصطلحات تلقائية بعد — يكتشفها بوت الكشّاف وبوتات المشاهد أثناء الترجمة." FontSize="12" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" Margin="0,0,0,6"/>
-             <ListBox x:Name="BotTermsList" MaxHeight="220">
+             <ListBox x:Name="BotTermsList" MaxHeight="220" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
               <ListBox.ItemTemplate>
                <DataTemplate>
                 <Grid>
@@ -698,7 +803,7 @@
            <Border x:Name="GlossaryPanel" Grid.Column="2" Style="{StaticResource SubtleCardBorderStyle}">
             <StackPanel>
              <TextBlock Text="معجمك اليدوي المعتمد (الأولوية القصوى)" FontWeight="SemiBold" Margin="0,0,0,6"/>
-             <ListBox x:Name="Terms" SelectionChanged="OpenTerm" MinHeight="100" MaxHeight="145" Margin="0,0,0,8">
+             <ListBox x:Name="Terms" SelectionChanged="OpenTerm" MinHeight="100" MaxHeight="145" Margin="0,0,0,8" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
               <ListBox.ItemTemplate>
                <DataTemplate>
                 <WrapPanel>
@@ -875,25 +980,25 @@
        <GridSplitter Grid.Column="1" Width="10" HorizontalAlignment="Stretch" Background="Transparent" Cursor="SizeWE"/>
 
        <!-- Left Contextual Inspector Panel -->
-       <Border x:Name="EditorInspectorPanel" Grid.Column="2" Style="{StaticResource CardBorderStyle}" Padding="15,14">
+       <Border x:Name="EditorInspectorPanel" Grid.Column="2" Style="{StaticResource CardBorderStyle}" Padding="16,14">
         <ScrollViewer VerticalScrollBarVisibility="Auto">
-         <StackPanel>
+         <StackPanel Margin="0,0,10,0">
           <Grid Margin="0,0,0,6">
            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-           <TextBlock Grid.Column="0" Text="لوحة التحرير والسياق" FontWeight="Bold" FontSize="15"/>
+           <TextBlock Grid.Column="0" Text="لوحة التحرير والسياق" FontWeight="Bold" FontSize="15.5" Foreground="{DynamicResource TextPrimary}"/>
            <TextBlock Grid.Column="1" x:Name="InspectorLengthText" Text="" FontSize="11.5" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
           </Grid>
 
-          <TextBlock x:Name="InspectorMetaText" Text="اختر سطراً من الجدول لعرض سياقه وتحريره." FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextTrimming="CharacterEllipsis" Margin="0,0,0,6"/>
+          <TextBlock x:Name="InspectorMetaText" Text="اختر سطراً من الجدول لعرض سياقه وتحريره." FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextTrimming="CharacterEllipsis" Margin="0,0,0,8"/>
 
           <!-- Source Box -->
-          <Border Style="{StaticResource SubtleCardBorderStyle}" Padding="10,8" Margin="0,0,0,8">
+          <Border Style="{StaticResource SubtleCardBorderStyle}" Padding="11,9" Margin="0,0,0,10">
            <TextBox x:Name="InspectorSourceText" FlowDirection="LeftToRight" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent" Padding="0" MaxHeight="95" VerticalScrollBarVisibility="Auto" FontSize="13"/>
           </Border>
 
           <!-- Protected Tokens Bar (Clickable to insert at cursor) -->
-          <StackPanel x:Name="InspectorTokensContainer" Visibility="Collapsed" Margin="0,0,0,8">
-           <Grid Margin="0,0,0,4">
+          <StackPanel x:Name="InspectorTokensContainer" Visibility="Collapsed" Margin="0,0,0,10">
+           <Grid Margin="0,0,0,5">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <TextBlock Grid.Column="0" Text="الرموز المحمية (انقر للإدراج):" FontSize="11.5" Foreground="{DynamicResource TextSecondary}"/>
             <TextBlock Grid.Column="1" x:Name="InspectorTokenStatusText" FontSize="11.5" FontWeight="SemiBold"/>
@@ -904,8 +1009,19 @@
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
              <DataTemplate>
-              <Button Tag="{Binding Token}" Click="InsertTokenChipClick" Padding="8,3" Margin="0,0,5,4" FontFamily="{StaticResource MonoFont}" FontSize="11.5" FlowDirection="LeftToRight" ToolTip="انقر لإدراج الرمز في موضع المؤشر">
-               <TextBlock Text="{Binding Label}" Foreground="{Binding StatusBrush}" FontWeight="SemiBold"/>
+              <Button Tag="{Binding Token}" Click="InsertTokenChipClick" Padding="9,4" Margin="0,0,5,4" FontFamily="{StaticResource MonoFont}" FontSize="11.5" FlowDirection="LeftToRight" ToolTip="انقر لإدراج الرمز في موضع المؤشر">
+               <TextBlock Text="{Binding Label}" FontWeight="SemiBold">
+                <TextBlock.Style>
+                 <Style TargetType="TextBlock">
+                  <Setter Property="Foreground" Value="{DynamicResource WarningFg}"/>
+                  <Style.Triggers>
+                   <DataTrigger Binding="{Binding IsSatisfied}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource SuccessFg}"/>
+                   </DataTrigger>
+                  </Style.Triggers>
+                 </Style>
+                </TextBlock.Style>
+               </TextBlock>
               </Button>
              </DataTemplate>
             </ItemsControl.ItemTemplate>
@@ -913,27 +1029,51 @@
           </StackPanel>
 
           <!-- Warning Banner if Row Has Warning -->
-          <TextBlock x:Name="InspectorWarningText" Foreground="{DynamicResource DangerFg}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,0,0,6"/>
+          <TextBlock x:Name="InspectorWarningText" Foreground="{DynamicResource DangerFg}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,0,0,8"/>
 
           <!-- Comfortable RTL Translation Box -->
-          <TextBlock Text="الترجمة العربية (تُحفظ تلقائياً · Ctrl+Enter للاعتماد والتقدم):" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,4"/>
-          <TextBox x:Name="InspectorTargetBox" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="92" MaxHeight="160" VerticalScrollBarVisibility="Auto" FontSize="14.5" TextChanged="InspectorTargetChanged" KeyDown="InspectorTargetKeyDown" LostFocus="InspectorTargetLostFocus"/>
+          <TextBlock Text="الترجمة العربية (تُحفظ تلقائياً · Ctrl+Enter للاعتماد والتقدم):" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,5"/>
+          <TextBox x:Name="InspectorTargetBox" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="96" MaxHeight="165" VerticalScrollBarVisibility="Auto" FontSize="14.5" TextChanged="InspectorTargetChanged" KeyDown="InspectorTargetKeyDown" LostFocus="InspectorTargetLostFocus"/>
 
-          <WrapPanel Margin="0,8,0,12">
-           <Button Content="اعتماد السطر ✓" Click="ApproveAndAdvanceClick" Style="{StaticResource PrimaryButtonStyle}" Padding="14,8"/>
-           <Button Content="إعادة ترجمة بالبوت" Click="Retranslate" Padding="11,8"/>
-           <Button Content="ذاكرة الترجمة" Click="SuggestMemory" Padding="11,8" Margin="0"/>
+          <WrapPanel Margin="0,10,0,10">
+           <Button Content="اعتماد السطر ✓" Click="ApproveAndAdvanceClick" Style="{StaticResource PrimaryButtonStyle}" Padding="13,7" Margin="0,0,6,6"/>
+           <Button Content="إعادة ترجمة بالبوت" Click="Retranslate" Padding="10,7" Margin="0,0,6,6"/>
+           <Button Content="ذاكرة الترجمة" Click="SuggestMemory" Padding="10,7" Margin="0,0,0,6"/>
           </WrapPanel>
 
-          <!-- Surrounding Scene Context -->
-          <TextBlock Text="سياق المشهد المحيط" FontWeight="SemiBold" FontSize="12.5" Foreground="{DynamicResource TextSecondary}" Margin="0,2,0,5"/>
+          <!-- Surrounding Scene Context (Dynamic Theme-Reactive) -->
+          <TextBlock Text="سياق المشهد المحيط" FontWeight="SemiBold" FontSize="12.5" Foreground="{DynamicResource TextSecondary}" Margin="0,2,0,6"/>
           <ItemsControl x:Name="InspectorNeighborsList">
            <ItemsControl.ItemTemplate>
             <DataTemplate>
-             <Border Background="{Binding RowBg}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="6" Padding="8,5" Margin="0,0,0,4">
+             <Border BorderThickness="1" CornerRadius="7" Padding="10,6" Margin="0,0,0,5">
+              <Border.Style>
+               <Style TargetType="Border">
+                <Setter Property="Background" Value="{DynamicResource BgElevated}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}"/>
+                <Style.Triggers>
+                 <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                  <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+                  <Setter Property="BorderBrush" Value="{DynamicResource AccentIndicator}"/>
+                 </DataTrigger>
+                </Style.Triggers>
+               </Style>
+              </Border.Style>
               <StackPanel>
                <TextBlock Text="{Binding Source}" FlowDirection="LeftToRight" FontSize="11" Foreground="{DynamicResource TextMuted}" TextTrimming="CharacterEllipsis"/>
-               <TextBlock Text="{Binding TargetPreview}" FontSize="12" Foreground="{Binding RowFg}" TextTrimming="CharacterEllipsis"/>
+               <TextBlock Text="{Binding TargetPreview}" FontSize="12.5" TextTrimming="CharacterEllipsis" Margin="0,2,0,0">
+                <TextBlock.Style>
+                 <Style TargetType="TextBlock">
+                  <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+                  <Style.Triggers>
+                   <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource AccentIndicator}"/>
+                    <Setter Property="FontWeight" Value="SemiBold"/>
+                   </DataTrigger>
+                  </Style.Triggers>
+                 </Style>
+                </TextBlock.Style>
+               </TextBlock>
               </StackPanel>
              </Border>
             </DataTemplate>
@@ -941,18 +1081,18 @@
           </ItemsControl>
 
           <!-- Inline Quick Glossary Pin -->
-          <Border Style="{StaticResource SubtleCardBorderStyle}" Margin="0,8,0,0" Padding="10,8">
+          <Border Style="{StaticResource SubtleCardBorderStyle}" Margin="0,8,0,0" Padding="11,9">
            <StackPanel>
-            <TextBlock Text="تثبيت مصطلح سريع في المعجم" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,5"/>
+            <TextBlock Text="تثبيت مصطلح سريع في المعجم" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,6"/>
             <Grid>
              <Grid.ColumnDefinitions>
               <ColumnDefinition Width="*"/>
               <ColumnDefinition Width="*"/>
               <ColumnDefinition Width="Auto"/>
              </Grid.ColumnDefinitions>
-             <TextBox Grid.Column="0" x:Name="QuickTermSource" FlowDirection="LeftToRight" FontSize="12" Margin="0,0,4,0" ToolTip="المصطلح الأصلي"/>
+             <TextBox Grid.Column="0" x:Name="QuickTermSource" FlowDirection="LeftToRight" FontSize="12" Margin="0,0,5,0" ToolTip="المصطلح الأصلي"/>
              <TextBox Grid.Column="1" x:Name="QuickTermTarget" FontSize="12" Margin="2,0,6,0" ToolTip="الترجمة العربية المعتمدة"/>
-             <Button Grid.Column="2" Content="تثبيت ★" Click="QuickPinGlossaryClick" FontSize="11.5" Padding="10,6" Margin="0"/>
+             <Button Grid.Column="2" Content="تثبيت ★" Click="QuickPinGlossaryClick" FontSize="11.5" Padding="11,6" Margin="0"/>
             </Grid>
            </StackPanel>
           </Border>
@@ -966,60 +1106,83 @@
     <!-- ==================== STAGE 4: FONT & ONE-CLICK DEPLOYMENT ==================== -->
     <TabItem x:Name="PackagesPage" Header="الخط والتثبيت" IsEnabled="False">
      <ScrollViewer VerticalScrollBarVisibility="Auto">
-      <StackPanel Margin="22,16" MaxWidth="1020" HorizontalAlignment="Stretch">
+      <Grid Margin="22,18" MaxWidth="1480" HorizontalAlignment="Stretch">
+       <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="1.15*" MinWidth="400"/>
+        <ColumnDefinition Width="16"/>
+        <ColumnDefinition Width="0.95*" MinWidth="340"/>
+       </Grid.ColumnDefinitions>
 
-       <!-- Card 1: Arabic Display Font & Live Game HUD Preview -->
-       <Border Style="{StaticResource CardBorderStyle}">
+       <!-- Right Column (Col 0 in RTL): Arabic Display Font & Engine Display Settings -->
+       <Border Grid.Column="0" Style="{StaticResource CardBorderStyle}" VerticalAlignment="Top">
         <StackPanel>
-         <TextBlock Text="1. مظهر الخط العربي داخل اللعبة" FontSize="18" FontWeight="Bold"/>
-         <TextBlock Text="اختر خطاً عربياً مدمجاً أو أضف خطك الخاص (.ttf / .otf)، وعاين شكله مباشرة قبل التثبيت." FontSize="12.5" Foreground="{DynamicResource TextSecondary}" Margin="0,3,0,10"/>
+         <TextBlock Text="1. مظهر الخط العربي داخل اللعبة" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}"/>
+         <TextBlock Text="اختر خطاً عربياً مدمجاً أو أضف خطك الخاص (.ttf / .otf)، وعاين شكله مباشرة قبل التثبيت." FontSize="12.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,3,0,12"/>
 
-         <WrapPanel Margin="0,0,0,8">
-          <ComboBox x:Name="DisplayFontSelector" Width="410" DisplayMemberPath="DisplayName" SelectionChanged="SelectDisplayFont" Margin="0,0,8,0" AutomationProperties.Name="خط العرض العربي"/>
-          <Button Content="+ إضافة خط خاص (.ttf / .otf)" Click="AddCustomFont"/>
-          <Button x:Name="DeleteCustomFontButton" Content="حذف الخط الخاص" Click="DeleteCustomFont" IsEnabled="False" Style="{StaticResource GhostButtonStyle}"/>
-         </WrapPanel>
+         <Grid Margin="0,0,0,8">
+          <Grid.ColumnDefinitions>
+           <ColumnDefinition Width="*"/>
+           <ColumnDefinition Width="Auto"/>
+           <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <ComboBox Grid.Column="0" x:Name="DisplayFontSelector" DisplayMemberPath="DisplayName" SelectionChanged="SelectDisplayFont" Margin="0,0,8,0" AutomationProperties.Name="خط العرض العربي"/>
+          <Button Grid.Column="1" Content="+ خط خاص" Click="AddCustomFont" ToolTip="إضافة ملف خط خاص (.ttf / .otf)" Margin="0,0,6,0"/>
+          <Button Grid.Column="2" x:Name="DeleteCustomFontButton" Content="حذف" Click="DeleteCustomFont" IsEnabled="False" Style="{StaticResource GhostButtonStyle}" Margin="0" ToolTip="حذف الخط الخاص المحدد"/>
+         </Grid>
 
-         <TextBlock x:Name="FontCompatibilityStatus" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource SuccessFg}" Margin="0,0,0,8"/>
+         <TextBlock x:Name="FontCompatibilityStatus" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource SuccessFg}" Margin="0,0,0,10"/>
 
          <!-- Simulated Game HUD Preview -->
-         <Border Background="#0B161B" BorderBrush="#23424E" BorderThickness="1" CornerRadius="10" Padding="18,14">
+         <Border Background="#0A1419" BorderBrush="#24424E" BorderThickness="1.2" CornerRadius="10" Padding="18,14">
           <StackPanel>
-           <TextBlock Text="معاينة شاشة اللعبة" FontSize="10.5" Foreground="#6D93A0" Margin="0,0,0,4"/>
-           <TextBlock x:Name="FontPreviewTitle" Text="مهمة جديدة: استكشاف القلعة القديمة · استمرار · الإعدادات" Foreground="#F4C542" FontSize="18.5" TextWrapping="Wrap" Margin="0,0,0,5"/>
-           <TextBlock x:Name="FontPreviewBody" Text="«هل أنت مستعد لبدء الرحلة؟ تأكد من تجهيز معداتك قبل عبور البوابة الشمالية (100%).»" Foreground="#F1F6F8" FontSize="15" TextWrapping="Wrap" Margin="0,0,0,5"/>
-           <TextBlock x:Name="FontPreviewMenu" Text="[E] تفاعل   ·   [Tab] الخريطة والمهام   ·   حفظ التقدّم   ·   القائمة الرئيسية" Foreground="#9EC2CF" FontSize="13" TextWrapping="Wrap"/>
+           <TextBlock Text="معاينة شاشة اللعبة" FontSize="10.5" Foreground="#7EA5B3" Margin="0,0,0,5"/>
+           <TextBlock x:Name="FontPreviewTitle" Text="مهمة جديدة: استكشاف القلعة القديمة · استمرار · الإعدادات" Foreground="#F6C84C" FontSize="18" TextWrapping="Wrap" Margin="0,0,0,6"/>
+           <TextBlock x:Name="FontPreviewBody" Text="«هل أنت مستعد لبدء الرحلة؟ تأكد من تجهيز معداتك قبل عبور البوابة الشمالية (100%).»" Foreground="#F1F6F8" FontSize="14.5" TextWrapping="Wrap" Margin="0,0,0,6"/>
+           <TextBlock x:Name="FontPreviewMenu" Text="[E] تفاعل   ·   [Tab] الخريطة والمهام   ·   حفظ التقدّم   ·   القائمة الرئيسية" Foreground="#A7CBD7" FontSize="12.5" TextWrapping="Wrap"/>
           </StackPanel>
          </Border>
 
          <!-- Engine-Conditional: Unity TextMeshPro Settings (ONLY visible on Unity projects) -->
          <Border x:Name="UnityTmpSettingsBorder" Visibility="Collapsed" Style="{StaticResource SubtleCardBorderStyle}" Margin="0,12,0,0">
           <StackPanel>
-           <TextBlock Text="ضبط العرض العربي لمحرك Unity (TextMeshPro)" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}" FontSize="13" Margin="0,0,0,6"/>
-           <WrapPanel>
-            <TextBlock Text="التفاف الأسطر:" VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,0,6,4"/>
-            <ComboBox x:Name="UnityWrapModeSelector" Width="255" SelectionChanged="SelectUnityArabicSettings" Margin="0,0,14,4" AutomationProperties.Name="التفاف الأسطر العربية في Unity">
-             <ComboBoxItem Tag="auto" Content="تلقائي ذكي للبطاقات والحوارات (موصى به)"/>
-             <ComboBoxItem Tag="16" Content="ضيق جداً للبطاقات الصغيرة (16 حرفاً)"/>
-             <ComboBoxItem Tag="20" Content="ضيق للبطاقات (20 حرفاً)"/>
-             <ComboBoxItem Tag="30" Content="متوسط (30 حرفاً)"/>
-             <ComboBoxItem Tag="45" Content="واسع للحوارات (45 حرفاً)"/>
-             <ComboBoxItem Tag="0" Content="إيقاف الالتفاف التلقائي"/>
-            </ComboBox>
-            <TextBlock Text="مقياس الحجم:" VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,0,6,4"/>
-            <ComboBox x:Name="UnityFontScaleSelector" Width="135" SelectionChanged="SelectUnityArabicSettings" Margin="0,0,0,4" AutomationProperties.Name="حجم الخط العربي في Unity">
-             <ComboBoxItem Tag="0.70" Content="70% (صغير)"/>
-             <ComboBoxItem Tag="0.75" Content="75%"/>
-             <ComboBoxItem Tag="0.80" Content="80% (افتراضي)"/>
-             <ComboBoxItem Tag="0.85" Content="85%"/>
-             <ComboBoxItem Tag="0.90" Content="90%"/>
-             <ComboBoxItem Tag="0.95" Content="95%"/>
-             <ComboBoxItem Tag="1.00" Content="100% (كامل)"/>
-             <ComboBoxItem Tag="1.10" Content="110% (كبير)"/>
-            </ComboBox>
-           </WrapPanel>
-           <CheckBox x:Name="UnityArabicShapingToggle" Content="تشكيل وترتيب العربية مسبقاً لـ TextMeshPro (أوقِفه فقط إذا كانت اللعبة تدعم RTL أصلياً)" IsChecked="True" Checked="SelectUnityArabicSettings" Unchecked="SelectUnityArabicSettings" FontSize="12"/>
-           <CheckBox x:Name="UnityContrastBoostToggle" Content="تعزيز وضوح الحروف العربية على الأزرار الفاتحة (خط أعرض + تحسين حواف SDF)" IsChecked="False" Checked="SelectUnityArabicSettings" Unchecked="SelectUnityArabicSettings" FontSize="12"/>
+           <TextBlock Text="ضبط العرض العربي لمحرك Unity (TextMeshPro)" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}" FontSize="13" Margin="0,0,0,8"/>
+           <Grid Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+             <ColumnDefinition Width="1.45*"/>
+             <ColumnDefinition Width="12"/>
+             <ColumnDefinition Width="0.95*"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+             <TextBlock Text="التفاف الأسطر" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,3"/>
+             <ComboBox x:Name="UnityWrapModeSelector" SelectionChanged="SelectUnityArabicSettings" AutomationProperties.Name="التفاف الأسطر العربية في Unity">
+              <ComboBoxItem Tag="auto" Content="تلقائي ذكي للبطاقات والحوارات (موصى به)"/>
+              <ComboBoxItem Tag="16" Content="ضيق جداً للبطاقات الصغيرة (16 حرفاً)"/>
+              <ComboBoxItem Tag="20" Content="ضيق للبطاقات (20 حرفاً)"/>
+              <ComboBoxItem Tag="30" Content="متوسط (30 حرفاً)"/>
+              <ComboBoxItem Tag="45" Content="واسع للحوارات (45 حرفاً)"/>
+              <ComboBoxItem Tag="0" Content="إيقاف الالتفاف التلقائي"/>
+             </ComboBox>
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+             <TextBlock Text="مقياس حجم الخط" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,3"/>
+             <ComboBox x:Name="UnityFontScaleSelector" SelectionChanged="SelectUnityArabicSettings" AutomationProperties.Name="حجم الخط العربي في Unity">
+              <ComboBoxItem Tag="0.70" Content="70% (صغير)"/>
+              <ComboBoxItem Tag="0.75" Content="75%"/>
+              <ComboBoxItem Tag="0.80" Content="80% (افتراضي)"/>
+              <ComboBoxItem Tag="0.85" Content="85%"/>
+              <ComboBoxItem Tag="0.90" Content="90%"/>
+              <ComboBoxItem Tag="0.95" Content="95%"/>
+              <ComboBoxItem Tag="1.00" Content="100% (كامل)"/>
+              <ComboBoxItem Tag="1.10" Content="110% (كبير)"/>
+             </ComboBox>
+            </StackPanel>
+           </Grid>
+           <CheckBox x:Name="UnityArabicShapingToggle" IsChecked="True" Checked="SelectUnityArabicSettings" Unchecked="SelectUnityArabicSettings" FontSize="12" Margin="0,4,0,4">
+            <TextBlock Text="تشكيل وترتيب العربية مسبقاً لـ TextMeshPro (أوقِفه فقط إذا كانت اللعبة تدعم RTL أصلياً)" TextWrapping="Wrap"/>
+           </CheckBox>
+           <CheckBox x:Name="UnityContrastBoostToggle" IsChecked="False" Checked="SelectUnityArabicSettings" Unchecked="SelectUnityArabicSettings" FontSize="12" Margin="0,4,0,2">
+            <TextBlock Text="تعزيز وضوح الحروف العربية على الأزرار الفاتحة (خط أعرض + تحسين حواف SDF)" TextWrapping="Wrap"/>
+           </CheckBox>
           </StackPanel>
          </Border>
 
@@ -1034,61 +1197,66 @@
         </StackPanel>
        </Border>
 
-       <!-- Card 2: Smart One-Click In-Place Deployment & Playtest -->
-       <Border Style="{StaticResource CardBorderStyle}" Margin="0,12,0,0">
-        <StackPanel>
-         <TextBlock Text="2. التثبيت الذكي داخل اللعبة والتجربة" FontSize="18" FontWeight="Bold"/>
-         <TextBlock Text="يثبّت التعريب والخط العربي مباشرة في مسار اللعبة مع حفظ نسخة احتياطية مؤكدة ببصمة SHA-256 للاستعادة بضغطة واحدة." FontSize="12.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,3,0,10"/>
+       <!-- Left Column (Col 2 in RTL): Smart One-Click Deployment + Standalone Export + Build Log -->
+       <StackPanel Grid.Column="2" VerticalAlignment="Top">
+        <!-- Card 2: Smart One-Click In-Place Deployment & Playtest -->
+        <Border Style="{StaticResource CardBorderStyle}">
+         <StackPanel>
+          <TextBlock Text="2. التثبيت الذكي داخل اللعبة والتجربة" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}"/>
+          <TextBlock Text="يثبّت التعريب والخط العربي مباشرة في مسار اللعبة مع نسخة احتياطية مؤكدة ببصمة SHA-256 للاستعادة بضغطة واحدة." FontSize="12.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,3,0,12"/>
 
-         <Border x:Name="DirectInstallStatusBorder" Style="{StaticResource SubtleCardBorderStyle}" Margin="0,0,0,12">
-          <StackPanel>
-           <TextBlock x:Name="DirectInstallStatusTitle" Text="الحالة: جارٍ فحص حالة التثبيت…" FontWeight="Bold" FontSize="13.5" Margin="0,0,0,3"/>
-           <TextBlock x:Name="DirectInstallStatusDetail" Text="" Foreground="{DynamicResource TextSecondary}" FontSize="12" TextWrapping="Wrap"/>
-          </StackPanel>
-         </Border>
+          <Border x:Name="DirectInstallStatusBorder" Style="{StaticResource SubtleCardBorderStyle}" Margin="0,0,0,12">
+           <StackPanel>
+            <TextBlock x:Name="DirectInstallStatusTitle" Text="الحالة: جارٍ فحص حالة التثبيت…" FontWeight="Bold" FontSize="13.5" Margin="0,0,0,3"/>
+            <TextBlock x:Name="DirectInstallStatusDetail" Text="" Foreground="{DynamicResource TextSecondary}" FontSize="12" TextWrapping="Wrap"/>
+           </StackPanel>
+          </Border>
 
-         <WrapPanel>
-          <Button x:Name="DirectInstallButton" Content="ثبّت التعريب داخل اللعبة (مع نسخة احتياطية)" Click="DirectInstallGame" Style="{StaticResource PrimaryButtonStyle}"/>
-          <Button x:Name="DirectRestoreButton" Content="إزالة التعريب واستعادة الأصل" Click="DirectRestoreGame" Visibility="Collapsed"/>
-          <Button x:Name="AcceptGameUpdateButton" Content="اعتماد تحديث اللعبة الجديد" Click="AcceptExternalGameUpdate" Visibility="Collapsed"/>
-          <Button x:Name="PackageTrial" Content="تجربة مؤقتة وتستعاد تلقائياً" Click="TryGame" Visibility="Collapsed"/>
-         </WrapPanel>
-        </StackPanel>
-       </Border>
-
-       <!-- Card 3: Standalone Mod Package Export & Advanced Tools -->
-       <Border Style="{StaticResource CardBorderStyle}" Margin="0,12,0,0">
-        <StackPanel>
-         <TextBlock Text="3. تصدير حزمة مستقلة للمشاركة" FontSize="16.5" FontWeight="SemiBold"/>
-         <TextBlock Text="لإنتاج مجلد تعريب منفصل جاهز للنشر أو المشاركة دون تعديل ملفات اللعبة المثبّتة." FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,2,0,10"/>
-         <WrapPanel>
-          <Button Content="بناء حزمة نهائية للمشاركة" Click="BuildFinal"/>
-          <Button Content="بناء حزمة معاينة (شاملة المسودات)" Click="BuildPreview"/>
-          <Button Content="تصدير XUnity.AutoTranslator (BepInEx)" Click="ExportXUnity" ToolTip="لألعاب Unity ذات النصوص المدمجة في الكود البرمجي"/>
-          <Button Content="فتح مجلد آخر ناتج" Click="OpenOutput"/>
-         </WrapPanel>
-
-         <Expander Header="أدوات التثبيت والاستعادة اليدوية المتقدمة" Margin="0,10,0,0">
           <WrapPanel>
-           <Button Content="تثبيت حزمة على نسخة لعبة أخرى" Click="Install"/>
-           <Button Content="استعادة ملفات من إيصال سابق" Click="Restore"/>
-           <Button x:Name="SteamRecoveryButton" Content="استعادة تجربة Steam معلّقة" Click="RetryTrialRecovery" Visibility="Collapsed"/>
+           <Button x:Name="DirectInstallButton" Content="ثبّت التعريب داخل اللعبة (مع نسخة احتياطية)" Click="DirectInstallGame" Style="{StaticResource PrimaryButtonStyle}" Margin="0,0,6,6"/>
+           <Button x:Name="DirectRestoreButton" Content="إزالة التعريب واستعادة الأصل" Click="DirectRestoreGame" Visibility="Collapsed" Margin="0,0,6,6"/>
+           <Button x:Name="AcceptGameUpdateButton" Content="اعتماد تحديث اللعبة الجديد" Click="AcceptExternalGameUpdate" Visibility="Collapsed" Margin="0,0,6,6"/>
+           <Button x:Name="PackageTrial" Content="تجربة مؤقتة وتستعاد تلقائياً" Click="TryGame" Visibility="Collapsed" Margin="0,0,0,6"/>
           </WrapPanel>
-         </Expander>
-        </StackPanel>
-       </Border>
+         </StackPanel>
+        </Border>
 
-       <TextBox x:Name="BuildLog" Height="125" Margin="0,12,0,0" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="{StaticResource MonoFont}" FontSize="12"/>
-      </StackPanel>
+        <!-- Card 3: Standalone Mod Package Export & Advanced Tools -->
+        <Border Style="{StaticResource CardBorderStyle}" Margin="0,14,0,0">
+         <StackPanel>
+          <TextBlock Text="3. تصدير حزمة مستقلة للمشاركة" FontSize="16.5" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}"/>
+          <TextBlock Text="لإنتاج مجلد تعريب منفصل جاهز للنشر أو المشاركة دون تعديل ملفات اللعبة المثبّتة." FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,3,0,12"/>
+          <UniformGrid Columns="2" Margin="0,0,0,4">
+           <Button Content="بناء حزمة نهائية للمشاركة" Click="BuildFinal" Margin="0,0,5,6"/>
+           <Button Content="بناء حزمة معاينة (مسودات)" Click="BuildPreview" Margin="5,0,0,6"/>
+           <Button Content="تصدير XUnity (BepInEx)" Click="ExportXUnity" Margin="0,0,5,0" ToolTip="لألعاب Unity ذات النصوص المدمجة في الكود البرمجي"/>
+           <Button Content="فتح مجلد آخر ناتج" Click="OpenOutput" Margin="5,0,0,0"/>
+          </UniformGrid>
+
+          <Expander Header="أدوات التثبيت والاستعادة اليدوية المتقدمة" Margin="0,10,0,0">
+           <WrapPanel>
+            <Button Content="تثبيت حزمة على نسخة لعبة أخرى" Click="Install" Margin="0,0,6,4"/>
+            <Button Content="استعادة ملفات من إيصال سابق" Click="Restore" Margin="0,0,6,4"/>
+            <Button x:Name="SteamRecoveryButton" Content="استعادة تجربة Steam معلّقة" Click="RetryTrialRecovery" Visibility="Collapsed" Margin="0,0,0,4"/>
+           </WrapPanel>
+          </Expander>
+         </StackPanel>
+        </Border>
+
+        <Expander Header="سجل البناء والتثبيت التفصيلي" IsExpanded="False" Margin="0,12,0,0">
+         <TextBox x:Name="BuildLog" Height="130" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="{StaticResource MonoFont}" FontSize="11.5"/>
+        </Expander>
+       </StackPanel>
+      </Grid>
      </ScrollViewer>
     </TabItem>
 
     <!-- ==================== DEDICATED VIEW: SETTINGS, API & ROUTING ==================== -->
     <TabItem x:Name="SettingsPage" Header="الإعدادات والـ API">
      <ScrollViewer VerticalScrollBarVisibility="Auto">
-      <StackPanel Margin="24,18" MaxWidth="1020" HorizontalAlignment="Stretch">
+      <StackPanel Margin="24,18" MaxWidth="1480" HorizontalAlignment="Stretch">
 
-       <TextBlock Text="الإعدادات واتصالات الذكاء الاصطناعي" FontSize="22" FontWeight="Bold"/>
+       <TextBlock Text="الإعدادات واتصالات الذكاء الاصطناعي" FontSize="22" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}"/>
        <TextBlock Text="أدِر ملفات اتصال الـ API، وتوجيه النماذج للبوتات، وأسعار التوكنز في مكان واحد مستقل عن شاشة العمل اليومية." FontSize="13" Foreground="{DynamicResource TextSecondary}" Margin="0,4,0,14"/>
 
        <!-- Segmented Settings Switcher (Left in RTL = Physical Right!) -->
@@ -1103,15 +1271,23 @@
        <!-- SETTINGS SUB-VIEW 1: API Connections -->
        <Border x:Name="ConnectionPanel" Style="{StaticResource CardBorderStyle}">
         <StackPanel>
-         <Border Style="{StaticResource SubtleCardBorderStyle}" Margin="0,0,0,14">
+         <Border Style="{StaticResource SubtleCardBorderStyle}" Margin="0,0,0,16">
           <StackPanel>
-           <TextBlock Text="ملفات الاتصال المحفوظة (يمكنك حفظ أكثر من مزوّد وتوزيعها على البوتات)" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}" Margin="0,0,0,6"/>
-           <WrapPanel>
-            <ComboBox x:Name="ProfileSelector" Width="220" DisplayMemberPath="Name" SelectionChanged="SelectProviderProfile" Margin="0,0,8,0" AutomationProperties.Name="ملف الاتصال المحفوظ"/>
-            <TextBox x:Name="ProfileNameInput" Width="195" Margin="0,0,8,0" ToolTip="اسم ملف الاتصال (مثال: DeepSeek أو Gemini)" AutomationProperties.Name="اسم ملف الاتصال"/>
-            <Button Content="+ اتصال جديد" Click="AddProviderProfile"/>
-            <Button x:Name="DeleteProfileButton" Content="حذف الاتصال" Click="DeleteProviderProfile" Style="{StaticResource GhostButtonStyle}"/>
-           </WrapPanel>
+           <TextBlock Text="ملفات الاتصال المحفوظة (يمكنك حفظ أكثر من مزوّد وتوزيعها على البوتات)" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}" Margin="0,0,0,8"/>
+           <Grid>
+            <Grid.ColumnDefinitions>
+             <ColumnDefinition Width="1.15*"/>
+             <ColumnDefinition Width="10"/>
+             <ColumnDefinition Width="*"/>
+             <ColumnDefinition Width="10"/>
+             <ColumnDefinition Width="Auto"/>
+             <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <ComboBox Grid.Column="0" x:Name="ProfileSelector" DisplayMemberPath="Name" SelectionChanged="SelectProviderProfile" AutomationProperties.Name="ملف الاتصال المحفوظ"/>
+            <TextBox Grid.Column="2" x:Name="ProfileNameInput" ToolTip="اسم ملف الاتصال (مثال: DeepSeek أو Gemini)" AutomationProperties.Name="اسم ملف الاتصال"/>
+            <Button Grid.Column="4" Content="+ اتصال جديد" Click="AddProviderProfile" Margin="0,0,6,0"/>
+            <Button Grid.Column="5" x:Name="DeleteProfileButton" Content="حذف الاتصال" Click="DeleteProviderProfile" Style="{StaticResource GhostButtonStyle}" Margin="0"/>
+           </Grid>
           </StackPanel>
          </Border>
 
@@ -1313,7 +1489,7 @@
           </Border>
          </UniformGrid>
 
-         <DataGrid x:Name="UsageLedgerGrid" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" RowHeight="34" MaxHeight="220" FontSize="12" SelectionChanged="SelectUsageRow">
+         <DataGrid x:Name="UsageLedgerGrid" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" RowHeight="36" MaxHeight="220" FontSize="12" SelectionChanged="SelectUsageRow">
           <DataGrid.Columns>
            <DataGridTextColumn Header="النموذج" Binding="{Binding Model}" Width="1.6*">
             <DataGridTextColumn.ElementStyle>
@@ -1325,18 +1501,33 @@
              </Style>
             </DataGridTextColumn.ElementStyle>
            </DataGridTextColumn>
-           <DataGridTextColumn Header="الطلبات" Binding="{Binding RequestsText}" Width="68"/>
-           <DataGridTextColumn Header="دخل (In)" Binding="{Binding InputText}" Width="92"/>
-           <DataGridTextColumn Header="خرج (Out)" Binding="{Binding OutputText}" Width="92"/>
-           <DataGridTextColumn Header="تفكير" Binding="{Binding ThinkingText}" Width="88"/>
-           <DataGridTextColumn Header="الإجمالي" Binding="{Binding TotalText}" Width="96"/>
-           <DataGridTextColumn Header="1M دخل" Binding="{Binding InputPriceText}" Width="84"/>
-           <DataGridTextColumn Header="1M خرج" Binding="{Binding OutputPriceText}" Width="84"/>
-           <DataGridTextColumn Header="التكلفة ($)" Binding="{Binding CostText}" Width="86">
+           <DataGridTextColumn Header="الطلبات" Binding="{Binding RequestsText}" Width="68">
+            <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="HorizontalAlignment" Value="Center"/></Style></DataGridTextColumn.ElementStyle>
+           </DataGridTextColumn>
+           <DataGridTextColumn Header="دخل (In)" Binding="{Binding InputText}" Width="92">
+            <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="HorizontalAlignment" Value="Center"/></Style></DataGridTextColumn.ElementStyle>
+           </DataGridTextColumn>
+           <DataGridTextColumn Header="خرج (Out)" Binding="{Binding OutputText}" Width="92">
+            <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="HorizontalAlignment" Value="Center"/></Style></DataGridTextColumn.ElementStyle>
+           </DataGridTextColumn>
+           <DataGridTextColumn Header="تفكير" Binding="{Binding ThinkingText}" Width="88">
+            <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="HorizontalAlignment" Value="Center"/></Style></DataGridTextColumn.ElementStyle>
+           </DataGridTextColumn>
+           <DataGridTextColumn Header="الإجمالي" Binding="{Binding TotalText}" Width="96">
+            <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="HorizontalAlignment" Value="Center"/><Setter Property="FontWeight" Value="SemiBold"/></Style></DataGridTextColumn.ElementStyle>
+           </DataGridTextColumn>
+           <DataGridTextColumn Header="1M دخل" Binding="{Binding InputPriceText}" Width="84">
+            <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="HorizontalAlignment" Value="Center"/></Style></DataGridTextColumn.ElementStyle>
+           </DataGridTextColumn>
+           <DataGridTextColumn Header="1M خرج" Binding="{Binding OutputPriceText}" Width="84">
+            <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="HorizontalAlignment" Value="Center"/></Style></DataGridTextColumn.ElementStyle>
+           </DataGridTextColumn>
+           <DataGridTextColumn Header="التكلفة ($)" Binding="{Binding CostText}" Width="90">
             <DataGridTextColumn.ElementStyle>
              <Style TargetType="TextBlock">
               <Setter Property="FlowDirection" Value="LeftToRight"/>
               <Setter Property="VerticalAlignment" Value="Center"/>
+              <Setter Property="HorizontalAlignment" Value="Center"/>
               <Setter Property="FontWeight" Value="Bold"/>
               <Setter Property="Foreground" Value="{DynamicResource SuccessFg}"/>
              </Style>
@@ -1347,17 +1538,33 @@
 
          <Border Style="{StaticResource SubtleCardBorderStyle}" Margin="0,12,0,0">
           <StackPanel>
-           <TextBlock Text="تخصيص سعر النموذج (بالدولار لكل 1 مليون توكن — متاح دائماً):" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,6"/>
-           <WrapPanel>
-            <TextBlock Text="النموذج:" VerticalAlignment="Center" FontSize="12" Margin="0,0,6,0"/>
-            <TextBox x:Name="PriceModelInput" Width="210" FlowDirection="LeftToRight" FontFamily="{StaticResource MonoFont}" Margin="0,0,12,0" ToolTip="اختر صفاً من الجدول أو اكتب اسم النموذج"/>
-            <TextBlock Text="1M دخل ($):" VerticalAlignment="Center" FontSize="12" Margin="0,0,6,0"/>
-            <TextBox x:Name="PriceInputPerMillion" Width="80" FlowDirection="LeftToRight" Margin="0,0,12,0" ToolTip="مثال: 0.30"/>
-            <TextBlock Text="1M خرج ($):" VerticalAlignment="Center" FontSize="12" Margin="0,0,6,0"/>
-            <TextBox x:Name="PriceOutputPerMillion" Width="80" FlowDirection="LeftToRight" Margin="0,0,10,0" ToolTip="مثال: 2.50"/>
-            <Button Content="حفظ السعر" Click="SaveModelPrice" Style="{StaticResource PrimaryButtonStyle}"/>
-            <Button Content="استعادة الافتراضي" Click="ResetModelPrice" Style="{StaticResource GhostButtonStyle}"/>
-           </WrapPanel>
+           <TextBlock Text="تخصيص سعر النموذج (بالدولار لكل 1 مليون توكن — متاح دائماً):" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,8"/>
+           <Grid>
+            <Grid.ColumnDefinitions>
+             <ColumnDefinition Width="1.5*"/>
+             <ColumnDefinition Width="10"/>
+             <ColumnDefinition Width="0.7*"/>
+             <ColumnDefinition Width="10"/>
+             <ColumnDefinition Width="0.7*"/>
+             <ColumnDefinition Width="12"/>
+             <ColumnDefinition Width="Auto"/>
+             <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+             <TextBlock Text="النموذج" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,3"/>
+             <TextBox x:Name="PriceModelInput" FlowDirection="LeftToRight" FontFamily="{StaticResource MonoFont}" ToolTip="اختر صفاً من الجدول أو اكتب اسم النموذج"/>
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+             <TextBlock Text="1M دخل ($)" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,3"/>
+             <TextBox x:Name="PriceInputPerMillion" FlowDirection="LeftToRight" ToolTip="مثال: 0.30"/>
+            </StackPanel>
+            <StackPanel Grid.Column="4">
+             <TextBlock Text="1M خرج ($)" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,3"/>
+             <TextBox x:Name="PriceOutputPerMillion" FlowDirection="LeftToRight" ToolTip="مثال: 2.50"/>
+            </StackPanel>
+            <Button Grid.Column="6" Content="حفظ السعر" Click="SaveModelPrice" Style="{StaticResource PrimaryButtonStyle}" VerticalAlignment="Bottom" Margin="0,0,6,2"/>
+            <Button Grid.Column="7" Content="استعادة الافتراضي" Click="ResetModelPrice" Style="{StaticResource GhostButtonStyle}" VerticalAlignment="Bottom" Margin="0,0,0,2"/>
+           </Grid>
           </StackPanel>
          </Border>
         </StackPanel>
