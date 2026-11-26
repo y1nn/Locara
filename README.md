@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/locara-banner.jpg" alt="Locara — PC Game Arabic Localization Studio" width="100%" />
+</p>
+
 <div dir="rtl">
 
 # Locara
