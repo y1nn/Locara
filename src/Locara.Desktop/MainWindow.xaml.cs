@@ -65,6 +65,7 @@ public partial class MainWindow:Window
         InitializeStudioShell();
         Loaded += (_, _) => SyncNavRailSelection();
         Loaded += async (_, _) => await RecoverTrial();
+        Loaded += async (_, _) => await CheckForUpdatesOnStartupAsync();
         Closed += (_, _) => recoveryLifetime.Cancel();
     }
     private static string Selected(ComboBox box)=>((ComboBoxItem)box.SelectedItem).Content.ToString()!;
@@ -133,7 +134,8 @@ public partial class MainWindow:Window
                     UnityScale: unityDisplay.FontScale.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
                     UnityShaping: unityDisplay.ShapeArabic ? "1" : "0",
                     UnityContrast: unityDisplay.ContrastBoost ? "1" : "0",
-                    UnrealAesKey: projSettings.UnrealAesKey);
+                    UnrealAesKey: projSettings.UnrealAesKey,
+                    UseSharedMemoryPrefill: projSettings.UseSharedMemoryPrefill);
             });
             if (!IsLoaded) return false;
 
@@ -142,6 +144,15 @@ public partial class MainWindow:Window
             packagePath = null;
             capabilityKey = null;
             capability = null;
+            ResetGlossaryAuditState();
+            loadingSharedMemoryPref = true;
+            try
+            {
+                if (UseSharedMemoryPrefill != null)
+                    UseSharedMemoryPrefill.IsChecked = opened.UseSharedMemoryPrefill;
+            }
+            finally { loadingSharedMemoryPref = false; }
+            _ = RefreshSharedMemoryBadgeAsync();
             SetTrialVisibility(false);
             ProjectTitle.Text = DashboardName.Text = opened.Info.Name;
             SourcePath.Text = opened.Info.Source;
@@ -217,14 +228,22 @@ public partial class MainWindow:Window
     private List<RecentProject>? latestRecent;
 
     private sealed record EditorPageData(List<Unit> Rows, string Engine);
-    private static EditorPageData ReadEditorPage(ProjectStore project, EditorView view) =>
-        new(project.Units(view.Search, view.Offset, status: view.Filter), new ProjectSettings(project).ScannedEngine);
+    private static EditorPageData ReadEditorPage(ProjectStore project, EditorView view, IReadOnlySet<string>? glossaryIds = null)
+    {
+        var rows = view.Filter == "glossary"
+            ? project.UnitsByIds(glossaryIds ?? (IReadOnlySet<string>)new HashSet<string>(), view.Search, view.Offset)
+            : project.Units(view.Search, view.Offset, status: view.Filter);
+        return new(rows, new ProjectSettings(project).ScannedEngine);
+    }
 
     private async Task RefreshRows(bool rememberView = false)
     {
         if (projectPath == null) return;
         string path = projectPath;
         var view = new EditorView(Search.Text, ReviewStatus, offset);
+        HashSet<string>? glossaryIds = view.Filter == "glossary"
+            ? glossaryViolationsById.Keys.ToHashSet(StringComparer.Ordinal)
+            : null;
         int request = ++editorRequest;
         Rows.IsEnabled = false;
         PageInfo.Text = "جارٍ تحميل النصوص…";
@@ -235,8 +254,9 @@ public partial class MainWindow:Window
             var page = await Task.Run(() =>
             {
                 using var project = new ProjectStore(path);
-                var data = ReadEditorPage(project, view);
-                if (rememberView) new ProjectSettings(project).SetEditorViewRaw(JsonSerializer.Serialize(view));
+                var data = ReadEditorPage(project, view, glossaryIds);
+                if (rememberView && view.Filter != "glossary")
+                    new ProjectSettings(project).SetEditorViewRaw(JsonSerializer.Serialize(view));
                 return data;
             });
             if (request == editorRequest) ApplyEditorPage(page, view.Offset);
@@ -294,6 +314,12 @@ public partial class MainWindow:Window
             using var project = new ProjectStore(projectPath, commandTimeout: 1);
             project.SavePage(edits);
             foreach (var edit in edits) savedTargets[edit.Unit.Id] = edit.Unit.Target;
+            var newlyApproved = edits
+                .Where(e => e.Approve && e.Unit.Status == "approved" && !string.IsNullOrWhiteSpace(e.Unit.Target))
+                .Select(e => (e.Unit.Source, e.Unit.Target))
+                .ToList();
+            if (newlyApproved.Count > 0)
+                RecordApprovedInSharedMemoryBackground(newlyApproved, scannedEngine);
             return true;
         }
         catch (EditConflictException error)
@@ -391,6 +417,8 @@ public partial class MainWindow:Window
         RoutingPanel.IsEnabled = !running;
         if (GlossaryEditControls != null) GlossaryEditControls.IsEnabled = !running;
         if (ClearBotTermsBtn != null) ClearBotTermsBtn.IsEnabled = !running && botTermRows.Count > 0;
+        if (BotGlossaryAuditBtn != null) BotGlossaryAuditBtn.IsEnabled = !running;
+        if (BotGlossaryAuditBanner != null) BotGlossaryAuditBanner.IsEnabled = !running;
         foreach (var termRow in botTermRows) termRow.CanMutate = !running;
         HeaderNewButton.IsEnabled = !running;
         HeaderOpenButton.IsEnabled = !running;
@@ -702,10 +730,13 @@ public partial class MainWindow:Window
             }, cancellation);
             var scan = result.Scan;
             SetCapabilities(result.Capability, result.Version);
-            ScanLog.Text = (scan.Package.Length == 0 ? "" : scan.Package + "\n")
+            string diagHeader = scan.Diagnostics.Count == 0
+                ? ""
+                : "تنبيهات الفحص:\n" + string.Join('\n', scan.Diagnostics.Select(item => "• " + item.Path + " — " + item.Message)) + "\n\n";
+            ScanLog.Text = diagHeader
+                + (scan.Package.Length == 0 ? "" : scan.Package + "\n")
                 + $"{scan.Files} ملفات / {scan.Units} نصوص\n"
-                + DescribeCapability(result.Capability) + "\n"
-                + string.Join('\n', scan.Diagnostics.Select(item => item.Path + " — " + item.Message));
+                + DescribeCapability(result.Capability);
             bool needsAesHint = scan.Units == 0 && scan.Diagnostics.Any(d => d.Message.Contains("AES", StringComparison.OrdinalIgnoreCase));
             if (needsAesHint) SourceAdvancedExpander.IsExpanded = true;
             ScanLogExpander.IsExpanded = scan.Diagnostics.Count > 0 || scan.Units == 0;

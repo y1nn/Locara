@@ -26,6 +26,12 @@
           "SQLitePCLRaw.core": "2.1.13"
         }
       },
+      "OodleSharp": {
+        "type": "Direct",
+        "requested": "[0.0.1, )",
+        "resolved": "0.0.1",
+        "contentHash": "8XioZSNsed2bv0ouBOqgHDH1guZepf844lCQGndo4jqzuFAiuurIlZ1my/3vXdN3aXdhe3jPrWQzDjXZqxZH7Q=="
+      },
       "SharpZipLib": {
         "type": "Direct",
         "requested": "[1.4.2, )",

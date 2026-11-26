@@ -545,6 +545,7 @@ public partial class MainWindow
                 using var project = new ProjectStore(path);
                 return project.ApproveAllValidDrafts();
             }, cancellation);
+            if (count > 0) SyncProjectApprovedToSharedMemoryBackground(path);
             Status.Text = count == 0
                 ? "لا توجد مسودات سليمة جاهزة للاعتماد."
                 : $"تم اعتماد {count:N0} مسودة سليمة دفعة واحدة.";
@@ -568,9 +569,93 @@ public partial class MainWindow
         string mode = TranslationMode.SelectedValue as string ?? "all-pending";
         bool reviewDrafts = mode == "review-drafts";
         bool editorScope = mode == "editor-scope";
+        bool persistSharedPrefill = UseSharedMemoryPrefill?.IsChecked == true;
+        bool useSharedPrefill = !reviewDrafts && persistSharedPrefill;
+        bool approveReviewed = AutoApproveReviewed?.IsChecked == true;
         var settings = ReadInlineTeamSettings(reviewDrafts);
         var profiles = BuildProviderProfiles(options);
         string search = Search.Text, filter = ReviewStatus;
+
+        TeamPlan? plan;
+        SharedMemoryPrefillResult? prefillResult = null;
+        try
+        {
+            (plan, prefillResult) = await Task.Run(() =>
+            {
+                using var project = new ProjectStore(path);
+                new ProjectSettings(project).UseSharedMemoryPrefill = persistSharedPrefill;
+                var team = new TranslationTeam(project);
+                List<Unit> rows = reviewDrafts
+                    ? project.Units(limit: -1, status: "review")
+                    : editorScope
+                        ? project.Units(search, limit: -1, status: filter)
+                        : project.Units(limit: -1, status: "pending");
+
+                SharedMemoryPrefillResult? prefill = null;
+                if (useSharedPrefill && rows.Any(r => r.Status == "pending"))
+                {
+                    using var tm = SharedTranslationMemory.OpenDefault();
+                    prefill = tm.PrefillProject(project, rows, autoApprove: approveReviewed);
+                    if (prefill.MatchedUnits > 0)
+                    {
+                        rows = editorScope
+                            ? project.Units(search, limit: -1, status: filter)
+                            : project.Units(limit: -1, status: "pending");
+                    }
+                }
+
+                if (!reviewDrafts && !rows.Any(r => r.Status == "pending") && prefill is { MatchedUnits: > 0 })
+                    return ((TeamPlan?)null, prefill);
+
+                return ((TeamPlan?)team.Capture(rows, options, settings, profiles), prefill);
+            });
+        }
+        catch (Exception error) { Status.Text = error.Message; return; }
+
+        if (path != projectPath || openingProject || work != null || !IsLoaded) return;
+
+        if (prefillResult is { MatchedUnits: > 0 })
+        {
+            _ = RefreshSharedMemoryBadgeAsync();
+            string conflictNote = prefillResult.SkippedGlossaryConflicts > 0
+                ? $" (تُرك {prefillResult.SkippedGlossaryConflicts:N0} سطر لاحترام المعجم اليدوي)"
+                : "";
+            string prefillMsg = $"الذاكرة المشتركة: عُبّئ {prefillResult.MatchedUnits:N0} نصاً متطابقاً 100% (توفير ~{prefillResult.SavedCharacters:N0} حرف){conflictNote}.";
+            AppendLiveEvent(prefillMsg);
+            Status.Text = prefillMsg;
+        }
+
+        if (plan == null)
+        {
+            await RefreshRows();
+            UpdateOverview();
+            return;
+        }
+
+        await RunTeamLive(path, plan, options, profiles, saveSettings: true,
+            overrideWorkers: settings.Workers, overrideFastMode: settings.FastMode, overrideSettings: settings);
+    }
+
+    private async Task StartTargetedGlossaryReviewAsync(IReadOnlyList<Unit> violatingUnits)
+    {
+        if (projectPath is not { } path || work != null || violatingUnits.Count == 0 || !SaveEdits()) return;
+        ProviderOptions options;
+        try { options = ReadProvider(); }
+        catch (Exception error)
+        {
+            OpenConnectionSettings();
+            Status.Text = error.Message;
+            return;
+        }
+
+        var baseSettings = ReadInlineTeamSettings(reviewDrafts: true) with
+        {
+            FastMode = false,
+            SmartReview = false,
+            ReviewDrafts = true,
+            IncludeApproved = true
+        };
+        var profiles = BuildProviderProfiles(options);
 
         TeamPlan plan;
         try
@@ -578,20 +663,19 @@ public partial class MainWindow
             plan = await Task.Run(() =>
             {
                 using var project = new ProjectStore(path);
-                var team = new TranslationTeam(project);
-                List<Unit> rows = reviewDrafts
-                    ? project.Units(limit: -1, status: "review")
-                    : editorScope
-                        ? project.Units(search, limit: -1, status: filter)
-                        : project.Units(limit: -1, status: "pending");
-                return team.Capture(rows, options, settings, profiles);
+                var freshIds = violatingUnits.Select(u => u.Id).ToHashSet(StringComparer.Ordinal);
+                var freshRows = project.UnitsByIds(freshIds, limit: -1);
+                return new TranslationTeam(project).Capture(freshRows, options, baseSettings, profiles);
             });
         }
         catch (Exception error) { Status.Text = error.Message; return; }
 
         if (path != projectPath || openingProject || work != null || !IsLoaded) return;
-        await RunTeamLive(path, plan, options, profiles, saveSettings: true,
-            overrideWorkers: settings.Workers, overrideFastMode: settings.FastMode, overrideSettings: settings);
+        SelectStage(TranslationPage);
+        await RunTeamLive(path, plan, options, profiles, saveSettings: false,
+            overrideWorkers: baseSettings.Workers, overrideFastMode: false, overrideSettings: baseSettings);
+        if (IsLoaded && projectPath == path && work == null)
+            await RunGlossaryAuditCoreAsync(autoFilterInEditor: ReviewStatus == "glossary");
     }
 
     private async void ResumeTeamQuick(object sender, RoutedEventArgs e) => await ResumeTeamQuickCore();
@@ -772,6 +856,8 @@ public partial class MainWindow
                 packagePath = result.output;
                 BuildLog.Text = "معاينة الفريق جاهزة\n" + result.output;
             }
+            if (approveReviewed && result.status.Saved > 0)
+                SyncProjectApprovedToSharedMemoryBackground(path);
             _ = ReloadLoreAndGlossariesAsync();
         }, keepTranslationInteractive: true);
 

@@ -8,6 +8,7 @@ namespace Locara.Desktop;
 public partial class MainWindow
 {
     private bool updatingGettextTarget;
+    private bool updatingRtlPluginOption;
     private int directInstallRefreshRequest;
 
     private async void RefreshDirectInstallStatus()
@@ -20,6 +21,7 @@ public partial class MainWindow
             DirectRestoreButton.Visibility = Visibility.Collapsed;
             AcceptGameUpdateButton.Visibility = Visibility.Collapsed;
             if (GettextPoTargetBorder != null) GettextPoTargetBorder.Visibility = Visibility.Collapsed;
+            if (UnityClassicRtlPluginBorder != null) UnityClassicRtlPluginBorder.Visibility = Visibility.Collapsed;
             return;
         }
         string path = projectPath;
@@ -35,18 +37,23 @@ public partial class MainWindow
                 string engine = projSettings.ScannedEngine;
                 var (hasActivePot, siblingPos) = new ProjectService(project).GetGettextPoStatus();
                 string savedPoTarget = projSettings.GettextPoTarget;
-                return (Destination: destination, State: state, Engine: engine, HasActivePot: hasActivePot, SiblingPos: siblingPos, SavedPoTarget: savedPoTarget, Error: (string?)null);
+                var rtlInspection = engine.Equals("unity", StringComparison.OrdinalIgnoreCase)
+                    ? UnityClassicRtlPlugin.Inspect(project)
+                    : null;
+                bool includeRtlPlugin = projSettings.IncludeClassicUnityRtlPlugin;
+                return (Destination: destination, State: state, Engine: engine, HasActivePot: hasActivePot, SiblingPos: siblingPos, SavedPoTarget: savedPoTarget, RtlPlugin: rtlInspection, IncludeRtlPlugin: includeRtlPlugin, Error: (string?)null);
             }
             catch (Exception error)
             {
-                return (Destination: "", State: (InPlaceInstallState?)null, Engine: "", HasActivePot: false, SiblingPos: new List<string>(), SavedPoTarget: "", Error: (string?)error.Message);
+                return (Destination: "", State: (InPlaceInstallState?)null, Engine: "", HasActivePot: false, SiblingPos: new List<string>(), SavedPoTarget: "", RtlPlugin: (UnityRtlPluginInspection?)null, IncludeRtlPlugin: false, Error: (string?)error.Message);
             }
         });
 
         if (!IsLoaded || request != directInstallRefreshRequest || projectPath != path) return;
-        var (destination, state, engine, hasActivePot, siblingPos, savedPoTarget, error) = result;
+        var (destination, state, engine, hasActivePot, siblingPos, savedPoTarget, rtlPlugin, includeRtlPlugin, error) = result;
         bool showUnityTmp = engine.Equals("unity", StringComparison.OrdinalIgnoreCase);
         UnityTmpSettingsBorder.Visibility = showUnityTmp ? Visibility.Visible : Visibility.Collapsed;
+        ApplyUnityRtlPluginUi(showUnityTmp, destination, rtlPlugin, includeRtlPlugin);
         PopulateGettextPoTargetSelector(hasActivePot, siblingPos, savedPoTarget);
         if (NavPackages != null)
         {
@@ -106,6 +113,97 @@ public partial class MainWindow
             DirectRestoreButton.Visibility = Visibility.Visible;
             AcceptGameUpdateButton.Visibility = Visibility.Collapsed;
         }
+    }
+
+    private void ApplyUnityRtlPluginUi(bool isUnity, string destination, UnityRtlPluginInspection? inspection, bool includeInPackage)
+    {
+        if (UnityClassicRtlPluginBorder == null) return;
+        if (!isUnity || inspection == null || inspection.Status == UnityRtlPluginStatus.NotUnity)
+        {
+            UnityClassicRtlPluginBorder.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        UnityClassicRtlPluginBorder.Visibility = Visibility.Visible;
+        updatingRtlPluginOption = true;
+        try
+        {
+            IncludeClassicRtlPluginToggle.IsChecked = includeInPackage;
+            IncludeClassicRtlPluginToggle.IsEnabled = inspection.Status != UnityRtlPluginStatus.UnsupportedIl2Cpp;
+        }
+        finally { updatingRtlPluginOption = false; }
+
+        UnityRtlPluginStatusBadge.Text = inspection.Summary;
+        string badgeKey = inspection.Status switch
+        {
+            UnityRtlPluginStatus.InstalledStandalone or UnityRtlPluginStatus.InstalledWithPackage or UnityRtlPluginStatus.ReadyToInstall => "SuccessFg",
+            UnityRtlPluginStatus.BepInExMissing or UnityRtlPluginStatus.ModifiedExternally => "WarningFg",
+            _ => "TextMuted"
+        };
+        UnityRtlPluginStatusBadge.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, badgeKey);
+        UnityRtlPluginDetailText.Text = inspection.Guidance;
+
+        bool canInstall = !string.IsNullOrWhiteSpace(destination)
+            && inspection.Status is UnityRtlPluginStatus.ReadyToInstall or UnityRtlPluginStatus.BepInExMissing or UnityRtlPluginStatus.ModifiedExternally;
+        InstallUnityRtlPluginBtn.Visibility = canInstall ? Visibility.Visible : Visibility.Collapsed;
+        InstallUnityRtlPluginBtn.Content = inspection.Status == UnityRtlPluginStatus.ModifiedExternally
+            ? "إعادة تثبيت ملحق الالتفاف"
+            : "تثبيت ملحق الالتفاف الآن (مع نسخة احتياطية)";
+
+        RemoveUnityRtlPluginBtn.Visibility = inspection.Status is UnityRtlPluginStatus.InstalledStandalone or UnityRtlPluginStatus.ModifiedExternally
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void SelectClassicRtlPluginOption(object sender, RoutedEventArgs e)
+    {
+        if (updatingRtlPluginOption || projectPath == null) return;
+        bool include = IncludeClassicRtlPluginToggle.IsChecked == true;
+        try
+        {
+            using var project = new ProjectStore(projectPath);
+            new ProjectSettings(project).IncludeClassicUnityRtlPlugin = include;
+            Status.Text = include
+                ? "سيُرفق ملحق إصلاح التفاف الأسطر (Locara.UnityRtlFix) تلقائياً عند بناء أو تثبيت حزمة التعريب."
+                : "أُلغي الإرفاق التلقائي لملحق الالتفاف مع حزم البناء.";
+        }
+        catch (Exception error) { Status.Text = error.Message; }
+    }
+
+    private async void InstallUnityRtlPluginClick(object sender, RoutedEventArgs e)
+    {
+        if (projectPath is not { } path || work != null || !SaveEdits()) return;
+        await Run(async ct =>
+        {
+            var (installed, inspection) = await Task.Run(() =>
+            {
+                using var project = new ProjectStore(path);
+                var res = UnityClassicRtlPlugin.InstallStandalone(project, ct);
+                return (res, UnityClassicRtlPlugin.Inspect(project, ct));
+            }, ct);
+            BuildLog.Text = $"ثُبّت ملحق إصلاح الالتفاف ({installed.Files} ملفات) مع نسخة احتياطية SHA-256:\n" +
+                $"• {UnityClassicRtlPlugin.PluginRelativePath}\n• {UnityClassicRtlPlugin.ConfigRelativePath}";
+            Status.Text = inspection.HasBepInEx
+                ? "✓ ثُبّت ملحق إصلاح الالتفاف بنجاح (BepInEx 5 مكتشف وجاهز)."
+                : "ثُبّتت ملفات الملحق داخل BepInEx/plugins — تذكّر فك ضغط BepInEx 5 في مجلد اللعبة لتفعيله.";
+            RefreshDirectInstallStatus();
+        });
+    }
+
+    private async void RemoveUnityRtlPluginClick(object sender, RoutedEventArgs e)
+    {
+        if (projectPath is not { } path || work != null || !SaveEdits()) return;
+        await Run(async ct =>
+        {
+            int restored = await Task.Run(() =>
+            {
+                using var project = new ProjectStore(path);
+                return UnityClassicRtlPlugin.UninstallStandalone(project, ct);
+            }, ct);
+            BuildLog.Text = $"أُزيل ملحق إصلاح الالتفاف واستُعيدت الحالة الأصلية ({restored} ملفات).";
+            Status.Text = "أُزيل ملحق إصلاح الالتفاف واستُعيدت الملفات الأصلية.";
+            RefreshDirectInstallStatus();
+        });
     }
 
     private void PopulateGettextPoTargetSelector(bool hasActivePot, List<string> siblingPos, string savedTarget)

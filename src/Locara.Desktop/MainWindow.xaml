@@ -65,6 +65,22 @@
 
     <!-- Bottom Settings & API Footer -->
     <StackPanel DockPanel.Dock="Bottom">
+     <Button x:Name="UpdateAvailableBadge" Click="OpenAvailableUpdateClick" Visibility="Collapsed"
+             Background="{DynamicResource AccentSoft}" BorderBrush="{DynamicResource AccentIndicator}"
+             Foreground="{DynamicResource AccentIndicator}" BorderThickness="1"
+             Padding="10,7" Margin="0,0,0,8" HorizontalContentAlignment="Stretch"
+             ToolTip="يتوفر إصدار رسمي أحدث من Locara على GitHub — اضغط لفتح صفحة الإصدار">
+      <Grid>
+       <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+       </Grid.ColumnDefinitions>
+       <Ellipse Grid.Column="0" Width="7" Height="7" Fill="{DynamicResource AccentIndicator}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+       <TextBlock Grid.Column="1" x:Name="UpdateAvailableBadgeText" Text="تحديث متاح" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+       <TextBlock Grid.Column="2" Text="↗" FontSize="11.5" FontWeight="Bold" Foreground="{DynamicResource AccentIndicator}" VerticalAlignment="Center" Margin="6,0,0,0"/>
+      </Grid>
+     </Button>
      <Border Height="1" Background="{DynamicResource BorderSubtle}" Margin="4,10"/>
      <RadioButton x:Name="NavSettings" GroupName="StudioNav" Style="{StaticResource RailNavRadioStyle}" Click="NavSettingsClick">
       <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
@@ -349,7 +365,7 @@
          </ComboBox>
         </Grid>
 
-        <DataGrid Grid.Row="2" x:Name="ScannedFilesGrid" AutoGenerateColumns="False" CanUserAddRows="False" SelectionMode="Single" RowHeight="38" FontSize="12.5" SelectionChanged="SelectScannedFileRow">
+        <DataGrid Grid.Row="2" x:Name="ScannedFilesGrid" MinHeight="180" AutoGenerateColumns="False" CanUserAddRows="False" SelectionMode="Single" RowHeight="38" FontSize="12.5" SelectionChanged="SelectScannedFileRow">
          <DataGrid.Columns>
           <DataGridTemplateColumn Header="تضمين" Width="62">
            <DataGridTemplateColumn.CellTemplate>
@@ -430,7 +446,7 @@
       </Border>
 
       <Expander x:Name="ScanLogExpander" Grid.Row="3" Header="سجل الفحص والتشخيصات التقنية" IsExpanded="False" Margin="0,6,0,0">
-       <TextBox x:Name="ScanLog" Height="100" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" AcceptsReturn="True" FontFamily="{StaticResource MonoFont}" FontSize="11.5"/>
+       <TextBox x:Name="ScanLog" Height="84" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" AcceptsReturn="True" FontFamily="{StaticResource MonoFont}" FontSize="11.5"/>
       </Expander>
      </Grid>
     </TabItem>
@@ -515,8 +531,14 @@
 
           <Grid Margin="0,2,0,10">
            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-           <CheckBox Grid.Column="0" x:Name="AutoApproveReviewed" IsChecked="True" Content="اعتماد الترجمات المدققة تلقائياً فور حفظها"/>
-           <TextBlock Grid.Column="1" x:Name="BudgetCapBadge" Text="" FontSize="12" Foreground="{DynamicResource WarningFg}" VerticalAlignment="Center" Visibility="Collapsed"/>
+           <StackPanel Grid.Column="0">
+            <CheckBox x:Name="AutoApproveReviewed" IsChecked="True" Content="اعتماد الترجمات المدققة تلقائياً فور حفظها"/>
+            <CheckBox x:Name="UseSharedMemoryPrefill" IsChecked="True" Checked="UseSharedMemoryPrefillChanged" Unchecked="UseSharedMemoryPrefillChanged" Content="تعبئة تلقائية من الذاكرة المشتركة (100%) قبل تشغيل البوتات لتوفير التوكنز" Margin="0,5,0,0"/>
+           </StackPanel>
+           <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right">
+            <TextBlock x:Name="SharedMemoryBadge" Text="" FontSize="11.5" Foreground="{DynamicResource AccentIndicator}" HorizontalAlignment="Right" Visibility="Collapsed"/>
+            <TextBlock x:Name="BudgetCapBadge" Text="" FontSize="12" Foreground="{DynamicResource WarningFg}" HorizontalAlignment="Right" Visibility="Collapsed" Margin="0,2,0,0"/>
+           </StackPanel>
            <TextBlock x:Name="ScopeSummary" Visibility="Collapsed"/>
           </Grid>
 
@@ -541,11 +563,29 @@
            <TextBlock x:Name="SavedTeamSummary" FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,2,0,0"/>
           </StackPanel>
           <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+           <Button x:Name="BotGlossaryAuditBtn" Content="فحص اتّساق المعجم" Click="RunGlossaryAuditClick" ToolTip="اكتشاف السطور المترجمة التي خالفت مصطلحاً مثبّتاً في معجمك اليدوي"/>
            <Button x:Name="TeamNotesButton" Content="ملاحظات المدقق" Click="ShowTeamNotes"/>
            <Button Content="ملف السجل (Log)" Click="OpenLiveLog" Style="{StaticResource GhostButtonStyle}"/>
            <Button x:Name="StopTranslationButton" Content="إيقاف مؤقت آمن" Click="CancelWork" Style="{StaticResource DangerButtonStyle}" Visibility="Collapsed" Margin="0"/>
           </StackPanel>
          </Grid>
+
+         <!-- Post-Translation Glossary Consistency Banner (Bot Studio) -->
+         <Border x:Name="BotGlossaryAuditBanner" Background="{DynamicResource WarningBg}" BorderBrush="{DynamicResource WarningFg}" BorderThickness="1" CornerRadius="9" Padding="14,10" Margin="0,0,0,10" Visibility="Collapsed">
+          <Grid>
+           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+           <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,12,0">
+            <TextBlock x:Name="BotGlossaryAuditTitle" FontWeight="Bold" Foreground="{DynamicResource WarningFg}" TextWrapping="Wrap"/>
+            <TextBlock x:Name="BotGlossaryAuditDetail" FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+           </StackPanel>
+           <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+            <Button Content="عرض في المحرّر" Click="FilterGlossaryViolationsClick" Padding="10,5" FontSize="12"/>
+            <Button x:Name="BotGlossaryExactFixBtn" Content="تحديث المطابقات التامة" Click="ApplyExactGlossaryFixesClick" Padding="10,5" FontSize="12" Visibility="Collapsed"/>
+            <Button Content="إعادة تدقيق بالبوت" Click="RetranslateGlossaryViolationsClick" Padding="10,5" FontSize="12"/>
+            <Button Content="✕" Click="DismissBotGlossaryBannerClick" Style="{StaticResource GhostButtonStyle}" Padding="7,4" FontSize="12" Margin="0"/>
+           </WrapPanel>
+          </Grid>
+         </Border>
 
          <!-- 3 Specialized Bot Cards -->
          <UniformGrid Columns="3" Margin="0,0,0,10">
@@ -825,6 +865,7 @@
               </UniformGrid>
               <WrapPanel>
                <Button Content="حفظ في المعجم" Click="SaveTerm"/>
+               <Button Content="فحص اتّساق المعجم" Click="RunGlossaryAuditClick"/>
                <Button Content="حذف المحدد" Click="DeleteTerm" Style="{StaticResource GhostButtonStyle}"/>
               </WrapPanel>
              </StackPanel>
@@ -855,20 +896,37 @@
        <RowDefinition Height="*"/>
       </Grid.RowDefinitions>
 
-      <!-- Smart Drafts Action Strip (Shown when review drafts exist) -->
-      <Border x:Name="DraftsActionPanel" Grid.Row="0" Background="{DynamicResource WarningBg}" BorderBrush="{DynamicResource WarningFg}" BorderThickness="1" CornerRadius="9" Padding="14,10" Margin="0,0,0,10" Visibility="Collapsed">
-       <Grid>
-        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-        <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,12,0">
-         <TextBlock x:Name="DraftsActionTitle" FontWeight="Bold" Foreground="{DynamicResource WarningFg}"/>
-         <TextBlock Text="يمكنك تدقيق المسودات آلياً عبر البوت المدقق أو اعتماد السليمة منها بنقرة واحدة." FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
-        </StackPanel>
-        <WrapPanel Grid.Column="1" VerticalAlignment="Center">
-         <Button Content="تدقيق المسودات بالبوت المدقق" Click="ReviewDraftsWithAi"/>
-         <Button Content="اعتماد كل السليمة دفعة واحدة" Click="ApproveAllDrafts" Margin="0"/>
-        </WrapPanel>
-       </Grid>
-      </Border>
+      <!-- Top Action Strips (Drafts + Glossary Consistency Audit) -->
+      <StackPanel Grid.Row="0">
+       <Border x:Name="DraftsActionPanel" Background="{DynamicResource WarningBg}" BorderBrush="{DynamicResource WarningFg}" BorderThickness="1" CornerRadius="9" Padding="14,10" Margin="0,0,0,10" Visibility="Collapsed">
+        <Grid>
+         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+         <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,12,0">
+          <TextBlock x:Name="DraftsActionTitle" FontWeight="Bold" Foreground="{DynamicResource WarningFg}"/>
+          <TextBlock Text="يمكنك تدقيق المسودات آلياً عبر البوت المدقق أو اعتماد السليمة منها بنقرة واحدة." FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
+         </StackPanel>
+         <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+          <Button Content="تدقيق المسودات بالبوت المدقق" Click="ReviewDraftsWithAi"/>
+          <Button Content="اعتماد كل السليمة دفعة واحدة" Click="ApproveAllDrafts" Margin="0"/>
+         </WrapPanel>
+        </Grid>
+       </Border>
+
+       <Border x:Name="GlossaryAuditBanner" Background="{DynamicResource WarningBg}" BorderBrush="{DynamicResource WarningFg}" BorderThickness="1" CornerRadius="9" Padding="14,10" Margin="0,0,0,10" Visibility="Collapsed">
+        <Grid>
+         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+         <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,12,0">
+          <TextBlock x:Name="GlossaryAuditBannerTitle" FontWeight="Bold" Foreground="{DynamicResource WarningFg}" TextWrapping="Wrap"/>
+          <TextBlock x:Name="GlossaryAuditBannerDetail" FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+         </StackPanel>
+         <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+          <Button x:Name="EditorGlossaryExactFixBtn" Content="تحديث المطابقات التامة" Click="ApplyExactGlossaryFixesClick" Visibility="Collapsed"/>
+          <Button Content="إعادة تدقيق المخالفات بالبوت" Click="RetranslateGlossaryViolationsClick"/>
+          <Button Content="إنهاء الفلتر" Click="ExitGlossaryFilterClick" Style="{StaticResource GhostButtonStyle}" Margin="0"/>
+         </WrapPanel>
+        </Grid>
+       </Border>
+      </StackPanel>
 
       <!-- Clean Search, Status Chips & Toolbar -->
       <Border Grid.Row="1" Style="{StaticResource CardBorderStyle}" Padding="12,10" Margin="0,0,0,10">
@@ -887,6 +945,7 @@
           <ComboBoxItem Content="معتمدة" Tag="approved"/>
           <ComboBoxItem Content="المسودات" Tag="translated"/>
           <ComboBoxItem Content="التعارضات" Tag="conflict"/>
+          <ComboBoxItem Content="مخالفات المعجم" Tag="glossary"/>
          </ComboBox>
 
          <RadioButton x:Name="EditorChipAll" GroupName="EditorFilterChips" Style="{StaticResource FilterChipRadioStyle}" Tag="" IsChecked="True" Click="EditorFilterChipClick" Content="الكل"/>
@@ -894,6 +953,8 @@
          <RadioButton x:Name="EditorChipReview" GroupName="EditorFilterChips" Style="{StaticResource FilterChipRadioStyle}" Tag="review" Click="EditorFilterChipClick" Content="للمراجعة"/>
          <RadioButton x:Name="EditorChipIssues" GroupName="EditorFilterChips" Style="{StaticResource FilterChipRadioStyle}" Tag="issues" Click="EditorFilterChipClick" Content="تنبيهات"/>
          <RadioButton x:Name="EditorChipApproved" GroupName="EditorFilterChips" Style="{StaticResource FilterChipRadioStyle}" Tag="approved" Click="EditorFilterChipClick" Content="معتمدة"/>
+         <RadioButton x:Name="EditorChipGlossary" GroupName="EditorFilterChips" Style="{StaticResource FilterChipRadioStyle}" Tag="glossary" Click="EditorFilterChipClick" Content="مخالفات المعجم" Visibility="Collapsed"/>
+         <Button x:Name="EditorGlossaryAuditBtn" Content="فحص المعجم" Click="RunGlossaryAuditClick" Padding="10,5" FontSize="12" Margin="6,0,0,0" ToolTip="فحص اتّساق السطور المترجمة مع المعجم اليدوي"/>
         </WrapPanel>
 
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -903,6 +964,7 @@
          <Button x:Name="EditorTrial" Content="جرّب اللعبة" Click="TryGame" Visibility="Collapsed" Padding="10,5" FontSize="12"/>
          <Menu VerticalAlignment="Center">
           <MenuItem Header="أدوات المحرّر ▾" Padding="10,6">
+           <MenuItem Header="فحص اتّساق المعجم اليدوي" Click="RunGlossaryAuditClick"/>
            <MenuItem Header="ترجمة الصفوف المحددة" Click="TranslateSelected"/>
            <MenuItem Header="اعتماد الصفحة الحالية فقط" Click="ApprovePage"/>
            <MenuItem Header="اعتماد كل المسودات السليمة" Click="ApproveAllDrafts"/>
@@ -1026,12 +1088,29 @@
            </ItemsControl>
           </StackPanel>
 
+          <!-- Live Glossary Consistency Alert -->
+          <Border x:Name="InspectorGlossaryAlertBorder" Background="{DynamicResource WarningBg}" BorderBrush="{DynamicResource WarningFg}" BorderThickness="1" CornerRadius="7" Padding="10,7" Margin="0,0,0,8" Visibility="Collapsed">
+           <TextBlock x:Name="InspectorGlossaryAlertText" Foreground="{DynamicResource WarningFg}" FontSize="11.5" FontWeight="SemiBold" TextWrapping="Wrap"/>
+          </Border>
+
           <!-- Warning Banner if Row Has Warning -->
           <TextBlock x:Name="InspectorWarningText" Foreground="{DynamicResource DangerFg}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,0,0,8"/>
 
           <!-- Comfortable RTL Translation Box -->
           <TextBlock Text="الترجمة العربية (تُحفظ تلقائياً · Ctrl+Enter للاعتماد والتقدم):" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,5"/>
           <TextBox x:Name="InspectorTargetBox" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="96" MaxHeight="165" VerticalScrollBarVisibility="Auto" FontSize="14.5" TextChanged="InspectorTargetChanged" KeyDown="InspectorTargetKeyDown" LostFocus="InspectorTargetLostFocus"/>
+
+          <!-- Smart UI Length Overflow Guard -->
+          <Border x:Name="InspectorLengthGuardPanel" Background="{DynamicResource BgSubtle}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="7" Padding="10,7" Margin="0,8,0,0" Visibility="Collapsed">
+           <StackPanel>
+            <Grid Margin="0,0,0,5">
+             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+             <TextBlock Grid.Column="0" x:Name="InspectorLengthGuardStatusText" FontSize="11.5" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,8,0"/>
+             <TextBlock Grid.Column="1" x:Name="InspectorLengthGuardBudgetText" FontSize="11" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+            </Grid>
+            <ProgressBar x:Name="InspectorLengthBar" Height="5" Minimum="0" Maximum="100" Value="0"/>
+           </StackPanel>
+          </Border>
 
           <WrapPanel Margin="0,10,0,10">
            <Button Content="اعتماد السطر ✓" Click="ApproveAndAdvanceClick" Style="{StaticResource PrimaryButtonStyle}" Padding="13,7" Margin="0,0,6,6"/>
@@ -1181,6 +1260,25 @@
            <CheckBox x:Name="UnityContrastBoostToggle" IsChecked="False" Checked="SelectUnityArabicSettings" Unchecked="SelectUnityArabicSettings" FontSize="12" Margin="0,4,0,2">
             <TextBlock Text="تعزيز وضوح الحروف العربية على الأزرار الفاتحة (خط أعرض + تحسين حواف SDF)" TextWrapping="Wrap"/>
            </CheckBox>
+          </StackPanel>
+         </Border>
+
+         <!-- Engine-Conditional: Classic Unity (UI.Text / NGUI) Runtime Line-Wrap Reflow Plugin -->
+         <Border x:Name="UnityClassicRtlPluginBorder" Visibility="Collapsed" Style="{StaticResource SubtleCardBorderStyle}" Margin="0,12,0,0">
+          <StackPanel>
+           <Grid Margin="0,0,0,4">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="إصلاح التفاف الصناديق الضيقة (UI.Text / NGUI)" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <TextBlock Grid.Column="1" x:Name="UnityRtlPluginStatusBadge" Text="" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+           </Grid>
+           <TextBlock x:Name="UnityRtlPluginDetailText" Text="" FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+           <CheckBox x:Name="IncludeClassicRtlPluginToggle" IsChecked="False" Checked="SelectClassicRtlPluginOption" Unchecked="SelectClassicRtlPluginOption" FontSize="12" Margin="0,0,0,8">
+            <TextBlock Text="تضمين ملحق إصلاح الالتفاف تلقائياً مع حزمة التثبيت والتصدير" TextWrapping="Wrap"/>
+           </CheckBox>
+           <WrapPanel>
+            <Button x:Name="InstallUnityRtlPluginBtn" Content="تثبيت ملحق الالتفاف الآن (مع نسخة احتياطية)" Click="InstallUnityRtlPluginClick" FontSize="12" Padding="11,6" Margin="0,0,6,4"/>
+            <Button x:Name="RemoveUnityRtlPluginBtn" Content="إزالة الملحق واستعادة الأصل" Click="RemoveUnityRtlPluginClick" Style="{StaticResource GhostButtonStyle}" FontSize="12" Padding="11,6" Visibility="Collapsed" Margin="0,0,0,4"/>
+           </WrapPanel>
           </StackPanel>
          </Border>
 
@@ -1456,6 +1554,19 @@
           </WrapPanel>
          </StackPanel>
         </Border>
+
+        <!-- Cross-Project Shared Translation Memory -->
+        <Border x:Name="SharedMemorySettingsCard" Style="{StaticResource CardBorderStyle}" Margin="0,12,0,0">
+         <StackPanel>
+          <TextBlock Text="الذاكرة المشتركة عابرة للمشاريع (Shared Translation Memory)" FontSize="16" FontWeight="Bold" Margin="0,0,0,4"/>
+          <TextBlock Text="تحفظ تلقائياً ترجماتك المعتمدة (مثل أزرار القوائم والإعدادات الشائعة) محلياً لتعبئة النصوص المتطابقة 100% في مشاريعك القادمة قبل تشغيل البوتات." FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+          <TextBlock x:Name="SharedMemorySettingsStats" Text="جارٍ قراءة إحصاءات الذاكرة المشتركة…" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}" Margin="0,0,0,10"/>
+          <WrapPanel>
+           <Button x:Name="SyncSharedMemoryBtn" Content="مزامنة نصوص المشروع المعتمدة الآن" Click="SyncSharedMemoryClick"/>
+           <Button Content="مسح الذاكرة المشتركة" Click="ClearSharedMemoryClick" Style="{StaticResource GhostButtonStyle}"/>
+          </WrapPanel>
+         </StackPanel>
+        </Border>
        </StackPanel>
 
        <!-- SETTINGS SUB-VIEW 3: Lifetime Usage & Model Pricing -->
@@ -1565,6 +1676,29 @@
            </Grid>
           </StackPanel>
          </Border>
+        </StackPanel>
+       </Border>
+
+       <!-- Quiet GitHub Releases Update Settings -->
+       <Border x:Name="AppUpdatesSettingsCard" Style="{StaticResource CardBorderStyle}" Margin="0,12,0,0">
+        <StackPanel>
+         <Grid Margin="0,0,0,4">
+          <Grid.ColumnDefinitions>
+           <ColumnDefinition Width="*"/>
+           <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Text="تحديثات Locara والإصدار" FontSize="16" FontWeight="Bold" VerticalAlignment="Center"/>
+          <Border Grid.Column="1" Background="{DynamicResource AccentSoft}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="6" Padding="9,2.5" VerticalAlignment="Center">
+           <TextBlock x:Name="AppCurrentVersionText" Text="v1.4.0" FlowDirection="LeftToRight" FontFamily="{StaticResource MonoFont}" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}"/>
+          </Border>
+         </Grid>
+         <TextBlock Text="يتحقّق Locara بهدوء عند التشغيل من أحدث إصدار رسمي عبر GitHub Releases (y1nn/Locara) بمهلة قصيرة وبدون أي تتبّع أو خوادم خارجية." FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+         <CheckBox x:Name="AutoCheckUpdatesCheckBox" IsChecked="True" Checked="AutoCheckUpdatesChanged" Unchecked="AutoCheckUpdatesChanged" Content="التحقق التلقائي الهادئ من التحديثات عند تشغيل البرنامج" Margin="0,0,0,8"/>
+         <TextBlock x:Name="UpdateCheckStatusText" Text="التحقق التلقائي مفعّل." FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+         <WrapPanel>
+          <Button x:Name="CheckUpdatesNowButton" Content="التحقق من التحديثات الآن" Click="CheckUpdatesNowClick"/>
+          <Button x:Name="OpenUpdateReleaseButton" Content="فتح صفحة الإصدار على GitHub ↗" Click="OpenAvailableUpdateClick" Style="{StaticResource OutlineAccentButtonStyle}" Visibility="Collapsed"/>
+         </WrapPanel>
         </StackPanel>
        </Border>
       </StackPanel>

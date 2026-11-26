@@ -1,13 +1,13 @@
 # Locara — Maintainer & Developer Reference
 
-Concise engineering reference for maintaining and extending **Locara** (`v1.3.0` baseline, November 2026).
+Concise engineering reference for maintaining and extending **Locara** (`v1.4.0` baseline, November 2026).
 
 ---
 
 ## 1. Build, Test, CI & Publish Commands
 
 - **SDK:** `.NET 10.0.404` pinned in [global.json](../global.json) (`TreatWarningsAsErrors=true`, `RestorePackagesWithLockFile=true`).
-- **Build & Test (`114` xUnit tests):**
+- **Build & Test (`153` xUnit tests):**
   ```powershell
   dotnet build -c Release -p:RestoreLockedMode=true
   dotnet test -c Release --no-build
@@ -45,9 +45,12 @@ Concise engineering reference for maintaining and extending **Locara** (`v1.3.0`
 | `ArabicFontCatalog.cs` | Bundled OFL 1.1 Arabic fonts, Windows system fonts, custom `.ttf`/`.otf` import, `ResolveBilingual` / `ResolveForUnreal` / `ResolveContrastVariant`, OFL license writer |
 | `UnrealLocresFormat.cs` | Pure-C# UE4/UE5 `.locres` v0–v3 reader/writer (UTF-16LE for Arabic) |
 | `UnrealStringTableFormat.cs` | Pure-C# UE4/UE5 `UStringTable` `.uasset` (standalone and split `.uasset` + `.uexp` pairs) reader/writer |
-| `UnrealPakCodec.cs` | Pure-C# `.pak` v4–v12 reader (including AES-256 ECB encrypted index & payload decryption), v8/v11/v12 drop-in `*_Locara_P.pak` writer, UE5 IoStore streaming `PatchExistingPak`, `.locres` + `StringTable` `.uasset`/`.uexp` + bilingual `.ufont`/`.ttf` patcher |
+| `UnrealPakCodec.cs` | Pure-C# `.pak` v4–v12 reader (None/Zlib/Gzip/LZ4/Oodle + AES-256 ECB encrypted index & payload decryption), v8/v11/v12 drop-in `*_Locara_P.pak` writer, UE5 IoStore streaming `PatchExistingPak`, `.locres` + `StringTable` `.uasset`/`.uexp` + bilingual `.ufont`/`.ttf` patcher |
 | `GodotTranslationFormat.cs` | Pure-C# Godot 3 & 4 `RSRC` and compressed `RSCC` (`FastLZ`, `Zlib/Deflate`, `Zstd`, `Gzip`) `.translation` (`OptimizedTranslation` / `PHashTranslation` with SMAZ + `Translation`) |
 | `Translation.cs` / `TranslationBots.cs` / `TranslationTeam.cs` | Token masking/validation, multi-turn `ChatTurn[]` API providers, `ArabicPromptPresets`, autonomous Lore & Glossary Bot (`GameTermMiner`), contiguous `SceneLaneBuilder` + rolling `SceneSessionState` + `LiveGlossary`, and `SmartQaEvaluator` |
+| `SharedTranslationMemory.cs` / `GlossaryConsistencyChecker.cs` / `UiLengthGuard.cs` | Cross-project SQLite WAL translation memory (`%LOCALAPPDATA%\Locara\translation-memory.db`) with 100% prefill, post-translation manual glossary consistency audit & exact-match fixer, and UI length overflow guard |
+| `UnityClassicRtlReflow.cs` / `UnityClassicRtlPlugin.cs` / `src/Locara.UnityRtlFix/` | Shared `netstandard2.0` + `net10.0` classic Unity multi-line Arabic RTL reflow engine + embedded MIT BepInEx 5 runtime plugin (`Locara.UnityRtlFix.dll`) with 1-click Stage 4 install/restore |
+| `AppUpdateChecker.cs` | Quiet, opt-out GitHub Releases (`y1nn/Locara`) update checker with SemVer 2.0.0 comparison, strict URL validation, 5s timeout, and zero telemetry |
 | `PackageInstaller.cs` / `SteamGameTrial.cs` / `StarTruckerTrial.cs` | SHA-256 verified in-place install/restore (supports newly added drop-in files & companion `.uexp` files) + Steam auto-restore trials |
 
 ---

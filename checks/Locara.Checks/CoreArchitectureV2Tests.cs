@@ -450,4 +450,258 @@ public sealed class CoreArchitectureV2Tests
         SHA1.HashData(primaryPlain).CopyTo(footer.AsSpan(41));
         fs.Write(footer);
     }
+
+    [Fact]
+    public void UnrealPakOodleCompressionRoundTripsLocresAndBuildsPatchPakWithFonts()
+    {
+        using var ws = new TempWorkspace();
+        string gameDir = Directory.CreateDirectory(ws.PathOf("ue-oodle-game")).FullName;
+        string paksDir = Directory.CreateDirectory(Path.Combine(gameDir, "StarGame", "Content", "Paks")).FullName;
+        string savedCrashDir = Directory.CreateDirectory(Path.Combine(gameDir, "StarGame", "Saved", "Config", "CrashReportClient", "UE4CC-Windows-0001")).FullName;
+
+        // Place runtime Saved/Config junk & UE build manifest beside the .pak to verify they are ignored cleanly.
+        File.WriteAllText(Path.Combine(savedCrashDir, "CrashReportClient.ini"),
+            "[CrashReportClient]\nDataRouterUrl=\nCrashReportClientVersion=2\nbImplicitSend=false\nbAllowToBeContacted=true\n");
+        File.WriteAllText(Path.Combine(gameDir, "Manifest_NonUFSFiles_Win64.txt"),
+            "StarGame/Binaries/Win64/StarGame.exe\t2026-01-01T00:00:00.000Z\n");
+
+        byte[] dummyLatinTtf = [0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        byte[] englishLocres = UnrealLocresFormat.Write(new UnrealLocresFormat.LocresDocument(3, [
+            new UnrealLocresFormat.LocresNamespace(10u, "UI", [
+                new UnrealLocresFormat.LocresEntry(20u, "Play", 30u, "Begin Spacewalk"),
+                new UnrealLocresFormat.LocresEntry(21u, "Exit", 31u, "Return to Airlock")
+            ])
+        ]));
+        // Multi-block (>64 KiB) non-StringTable .uasset to exercise Block-0 prefix rejection cleanly.
+        byte[] dummyLargeUasset = new byte[100_000];
+        BinaryPrimitives.WriteUInt32LittleEndian(dummyLargeUasset, UnrealStringTableFormat.PackageFileTag);
+        BinaryPrimitives.WriteInt32LittleEndian(dummyLargeUasset.AsSpan(4), -7); // UE4 legacyVer
+
+        string pakPath = Path.Combine(paksDir, "pakchunk0-WindowsNoEditor.pak");
+        WriteOodleCompressedV11Pak(pakPath, "../../../", [
+            ("StarGame/Content/Localization/Game/en-US/Game.locres", englishLocres),
+            ("StarGame/Content/UI/Fonts/MainFont.ufont", dummyLatinTtf),
+            ("StarGame/Content/Maps/DummyLarge.uasset", dummyLargeUasset)
+        ]);
+
+        using var store = ProjectStore.Create(ws.PathOf("ue-oodle-proj"), "UeOodleGame", gameDir);
+        var svc = new ProjectService(store);
+
+        var scan = svc.Scan();
+        Assert.Empty(scan.Diagnostics);
+        Assert.Equal(1, scan.Files);
+        Assert.Equal(2, scan.Units);
+
+        var unit = store.Units("Begin Spacewalk").Single();
+        unit.Target = "ابدأ السير الفضائي";
+        store.Save(unit, approve: true);
+
+        var built = svc.Build(ws.PathOf("ue-oodle-out"), final: true);
+        Assert.Equal(1, built.Translations);
+        string patchPak = Path.Combine(built.Directory, "resources/StarGame/Content/Paks/pakchunk0-WindowsNoEditor_Locara_P.pak");
+        Assert.True(File.Exists(patchPak));
+
+        var patchInfo = UnrealPakCodec.ReadIndex(patchPak);
+        Assert.Contains(patchInfo.Entries, e => e.Path.Equals("StarGame/Content/UI/Fonts/MainFont.ufont", StringComparison.OrdinalIgnoreCase));
+        var patchSlots = UnrealPakFormat.ExtractFromFile(patchPak);
+        Assert.Contains(patchSlots, s => s.Source == "ابدأ السير الفضائي");
+    }
+
+    [Fact]
+    public void EnginesExcludesUnrealSavedDirectoriesAndManifestFiles()
+    {
+        Assert.True(Engines.IsEngineInternalMetadata("MyGame/Saved/Config/CrashReportClient/UE4CC-Windows-123/CrashReportClient.ini"));
+        Assert.True(Engines.IsEngineInternalMetadata("MyGame/Saved/Logs/MyGame.log"));
+        Assert.True(Engines.IsEngineInternalMetadata("Engine/Saved/Config/WindowsNoEditor/Engine.ini"));
+        Assert.True(Engines.IsEngineInternalMetadata("Manifest_NonUFSFiles_Win64.txt"));
+        Assert.True(Engines.IsEngineInternalMetadata("Manifest_DebugFiles_Win64.txt"));
+        Assert.True(Engines.IsEngineInternalMetadata("Manifest_UFSFiles_Win64.txt"));
+
+        // Legitimate localization paths must NOT be excluded
+        Assert.False(Engines.IsEngineInternalMetadata("MyGame/Content/Localization/Game/en-US/Game.locres"));
+        Assert.False(Engines.IsEngineInternalMetadata("MyGame/Content/Paks/pakchunk0-WindowsNoEditor.pak"));
+        Assert.False(Engines.IsEngineInternalMetadata("Data/SavedDialogues/en.json"));
+    }
+
+    [Fact]
+    public void TextQualityClassifierMarksBooleanAndNullLiteralsAsTechnical()
+    {
+        Assert.Equal(StringQuality.Technical, TextQualityClassifier.ClassifyString("true"));
+        Assert.Equal(StringQuality.Technical, TextQualityClassifier.ClassifyString("False"));
+        Assert.Equal(StringQuality.Technical, TextQualityClassifier.ClassifyString("null"));
+        Assert.Equal(StringQuality.Technical, TextQualityClassifier.ClassifyString("nil"));
+        Assert.Equal(StringQuality.Technical, TextQualityClassifier.ClassifyString("NaN"));
+
+        var iniClass = TextQualityClassifier.ClassifyFile(
+            "CrashReportClient.ini",
+            [("CrashReportClientVersion", "2"), ("bImplicitSend", "false"), ("bAllowToBeContacted", "true")],
+            "ini");
+        Assert.Equal(FileQualityVerdict.Technical, iniClass.Verdict);
+        Assert.Equal(0, iniClass.HumanCount);
+    }
+
+    private static void WriteOodleCompressedV11Pak(
+        string destinationPath,
+        string mountPoint,
+        IReadOnlyList<(string Path, byte[] Bytes)> entries)
+    {
+        const ulong pathHashSeed = 0x9B56FB58ul;
+        const int blockSize = 65536;
+        using var fs = File.Open(destinationPath, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+
+        var written = new List<(string Path, long Offset, long CompressedSize, long UncompressedSize, byte[] Sha1, List<(long Start, long End)> Blocks)>();
+        Span<byte> fixedHead = stackalloc byte[48];
+        Span<byte> i32 = stackalloc byte[4];
+        Span<byte> blkBuf = stackalloc byte[16];
+        Span<byte> tail = stackalloc byte[5];
+        foreach (var (relPath, plainBytes) in entries)
+        {
+            string rel = relPath.Replace('\\', '/').TrimStart('/');
+            byte[] sha1 = SHA1.HashData(plainBytes);
+            long entryOffset = fs.Position;
+
+            // Split payload into <=64 KiB Oodle uncompressed Kraken chunks (0xCC 0x06 + raw chunk bytes).
+            var compChunks = new List<byte[]>();
+            int pos = 0;
+            do
+            {
+                int chunkLen = Math.Min(blockSize, plainBytes.Length - pos);
+                byte[] chunk = new byte[2 + chunkLen];
+                chunk[0] = 0xCC; // keyframe + uncompressed Oodle chunk
+                chunk[1] = 0x06; // Kraken decoder tag
+                Buffer.BlockCopy(plainBytes, pos, chunk, 2, chunkLen);
+                compChunks.Add(chunk);
+                pos += chunkLen;
+            }
+            while (pos < plainBytes.Length);
+
+            long totalCompSize = compChunks.Sum(c => (long)c.Length);
+            long headerSize = 48 + 4 + compChunks.Count * 16 + 5;
+            var blocks = new List<(long Start, long End)>(compChunks.Count);
+            long relCursor = headerSize;
+            foreach (var chunk in compChunks)
+            {
+                blocks.Add((relCursor, relCursor + chunk.Length));
+                relCursor += chunk.Length;
+            }
+
+            // Write inline FPakEntry header (v11: CompressionMethodIndex=1 -> "Oodle", relative block offsets)
+            fixedHead.Clear();
+            BinaryPrimitives.WriteInt64LittleEndian(fixedHead[0..], 0L);
+            BinaryPrimitives.WriteInt64LittleEndian(fixedHead[8..], totalCompSize);
+            BinaryPrimitives.WriteInt64LittleEndian(fixedHead[16..], plainBytes.LongLength);
+            BinaryPrimitives.WriteUInt32LittleEndian(fixedHead[24..], 1u); // method #1 = "Oodle"
+            sha1.CopyTo(fixedHead[28..48]);
+            fs.Write(fixedHead);
+
+            BinaryPrimitives.WriteInt32LittleEndian(i32, blocks.Count);
+            fs.Write(i32);
+            foreach (var (s, e) in blocks)
+            {
+                BinaryPrimitives.WriteInt64LittleEndian(blkBuf[0..], s);
+                BinaryPrimitives.WriteInt64LittleEndian(blkBuf[8..], e);
+                fs.Write(blkBuf);
+            }
+            tail[0] = 0; // not encrypted, not deleted
+            BinaryPrimitives.WriteUInt32LittleEndian(tail[1..], blockSize);
+            fs.Write(tail);
+
+            foreach (var chunk in compChunks)
+                fs.Write(chunk);
+
+            written.Add((rel, entryOffset, totalCompSize, plainBytes.LongLength, sha1, blocks));
+        }
+
+        // Encode entries in EncodedPakEntries bitfields (v11 split index)
+        using var encEntriesMs = new MemoryStream();
+        var encodedOffsets = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        Span<byte> encBuf = stackalloc byte[16];
+        Span<byte> bsz = stackalloc byte[4];
+        foreach (var item in written)
+        {
+            int encOff = (int)encEntriesMs.Position;
+            uint compBlockSizeEncoded = (uint)(blockSize >> 11); // 65536 / 2048 = 32
+            uint flags = (1u << 31) | (1u << 30) | (1u << 29) | (1u << 23) | ((uint)item.Blocks.Count << 6) | compBlockSizeEncoded;
+            BinaryPrimitives.WriteUInt32LittleEndian(encBuf[0..], flags);
+            BinaryPrimitives.WriteUInt32LittleEndian(encBuf[4..], (uint)item.Offset);
+            BinaryPrimitives.WriteUInt32LittleEndian(encBuf[8..], (uint)item.UncompressedSize);
+            BinaryPrimitives.WriteUInt32LittleEndian(encBuf[12..], (uint)item.CompressedSize);
+            encEntriesMs.Write(encBuf);
+            if (item.Blocks.Count > 1)
+            {
+                foreach (var (s, e) in item.Blocks)
+                {
+                    BinaryPrimitives.WriteUInt32LittleEndian(bsz, (uint)(e - s));
+                    encEntriesMs.Write(bsz);
+                }
+            }
+            encodedOffsets[item.Path] = encOff;
+        }
+        byte[] encodedEntriesBytes = encEntriesMs.ToArray();
+
+        // Build FullDirectoryIndex
+        var byDir = written.GroupBy(w =>
+        {
+            int slash = w.Path.LastIndexOf('/');
+            return slash < 0 ? "/" : w.Path[..(slash + 1)];
+        }, StringComparer.OrdinalIgnoreCase).ToList();
+
+        byte[] fullDirBytes;
+        using (var fdMs = new MemoryStream())
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(i32, byDir.Count);
+            fdMs.Write(i32);
+            foreach (var grp in byDir)
+            {
+                UnrealLocresFormat.WriteFString(fdMs, grp.Key);
+                var items = grp.ToList();
+                BinaryPrimitives.WriteInt32LittleEndian(i32, items.Count);
+                fdMs.Write(i32);
+                foreach (var it in items)
+                {
+                    int slash = it.Path.LastIndexOf('/');
+                    string fileName = slash < 0 ? it.Path : it.Path[(slash + 1)..];
+                    UnrealLocresFormat.WriteFString(fdMs, fileName);
+                    BinaryPrimitives.WriteInt32LittleEndian(i32, encodedOffsets[it.Path]);
+                    fdMs.Write(i32);
+                }
+            }
+            fullDirBytes = fdMs.ToArray();
+        }
+
+        byte[] BuildPrimary(long fdOff)
+        {
+            using var pMs = new MemoryStream();
+            Span<byte> buf8 = stackalloc byte[8];
+            UnrealLocresFormat.WriteFString(pMs, mountPoint);
+            BinaryPrimitives.WriteInt32LittleEndian(buf8[..4], written.Count); pMs.Write(buf8[..4]);
+            BinaryPrimitives.WriteUInt64LittleEndian(buf8, pathHashSeed); pMs.Write(buf8);
+            BinaryPrimitives.WriteInt32LittleEndian(buf8[..4], 0); pMs.Write(buf8[..4]); // hasPathHash = 0
+            BinaryPrimitives.WriteInt32LittleEndian(buf8[..4], 1); pMs.Write(buf8[..4]); // hasFullDir = 1
+            BinaryPrimitives.WriteInt64LittleEndian(buf8, fdOff); pMs.Write(buf8);
+            BinaryPrimitives.WriteInt64LittleEndian(buf8, fullDirBytes.LongLength); pMs.Write(buf8);
+            pMs.Write(SHA1.HashData(fullDirBytes));
+            BinaryPrimitives.WriteInt32LittleEndian(buf8[..4], encodedEntriesBytes.Length); pMs.Write(buf8[..4]);
+            pMs.Write(encodedEntriesBytes);
+            BinaryPrimitives.WriteInt32LittleEndian(buf8[..4], 0); pMs.Write(buf8[..4]); // fallback files count = 0
+            return pMs.ToArray();
+        }
+
+        long primaryOffset = fs.Position;
+        long fullDirOffset = primaryOffset + BuildPrimary(0).Length;
+        byte[] primaryBytes = BuildPrimary(fullDirOffset);
+
+        fs.Write(primaryBytes);
+        fs.Write(fullDirBytes);
+
+        // 221-byte v11 footer with CompressionMethods[0] = "Oodle" (at offset 61, 5x32-byte slots)
+        byte[] footer = new byte[221];
+        BinaryPrimitives.WriteUInt32LittleEndian(footer.AsSpan(17), UnrealPakCodec.PakMagic);
+        BinaryPrimitives.WriteInt32LittleEndian(footer.AsSpan(21), 11);
+        BinaryPrimitives.WriteInt64LittleEndian(footer.AsSpan(25), primaryOffset);
+        BinaryPrimitives.WriteInt64LittleEndian(footer.AsSpan(33), primaryBytes.LongLength);
+        SHA1.HashData(primaryBytes).CopyTo(footer.AsSpan(41));
+        Encoding.ASCII.GetBytes("Oodle").CopyTo(footer.AsSpan(61));
+        fs.Write(footer);
+    }
 }

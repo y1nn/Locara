@@ -55,6 +55,11 @@
           "SQLitePCLRaw.core": "2.1.13"
         }
       },
+      "OodleSharp": {
+        "type": "Transitive",
+        "resolved": "0.0.1",
+        "contentHash": "8XioZSNsed2bv0ouBOqgHDH1guZepf844lCQGndo4jqzuFAiuurIlZ1my/3vXdN3aXdhe3jPrWQzDjXZqxZH7Q=="
+      },
       "RBush.Signed": {
         "type": "Transitive",
         "resolved": "4.0.0",
@@ -120,6 +125,7 @@
         "dependencies": {
           "ClosedXML": "[0.105.0, )",
           "Microsoft.Data.Sqlite": "[10.0.15, )",
+          "OodleSharp": "[0.0.1, )",
           "SQLitePCLRaw.bundle_e_sqlite3": "[3.0.5, )",
           "SharpZipLib": "[1.4.2, )",
           "YamlDotNet": "[16.3.0, )",

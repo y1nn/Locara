@@ -93,6 +93,26 @@ public sealed class ProjectSettings(ProjectStore store)
         set => store.Set("automatic_output", value ? "true" : "false");
     }
 
+    public bool UseSharedMemoryPrefill
+    {
+        get
+        {
+            string raw = store.Get("use_shared_memory_prefill");
+            return raw.Length == 0 || raw == "true" || raw == "1";
+        }
+        set => store.Set("use_shared_memory_prefill", value ? "true" : "false");
+    }
+
+    public bool IncludeClassicUnityRtlPlugin
+    {
+        get
+        {
+            string raw = store.Get("unity_classic_rtl_plugin");
+            return raw == "true" || raw == "1";
+        }
+        set => store.Set("unity_classic_rtl_plugin", value ? "true" : "false");
+    }
+
     public UnityArabicDisplayOptions ResolveUnityDisplayOptions() =>
         UnityArabicDisplayOptions.Parse(
             store.Get("unity_arabic_wrap"),

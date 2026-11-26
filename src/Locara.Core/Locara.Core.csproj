@@ -6,10 +6,23 @@
     <PackageReference Include="YamlDotNet" Version="16.3.0" />
     <PackageReference Include="ClosedXML" Version="0.105.0" />
     <PackageReference Include="ZstdSharp.Port" Version="0.8.5" />
+    <PackageReference Include="OodleSharp" Version="0.0.1" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Locara.Checks" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Locara.UnityRtlFix/Locara.UnityRtlFix.csproj"
+                      ReferenceOutputAssembly="false"
+                      SkipGetTargetFrameworkProperties="true"
+                      UndefineProperties="RuntimeIdentifier;SelfContained;PublishSingleFile" />
+  </ItemGroup>
+  <Target Name="EmbedUnityRtlFixPlugin" BeforeTargets="SplitResourcesByCulture" DependsOnTargets="ResolveProjectReferences">
+    <ItemGroup>
+      <EmbeddedResource Include="$(MSBuildThisFileDirectory)..\Locara.UnityRtlFix\bin\$(Configuration)\netstandard2.0\Locara.UnityRtlFix.dll"
+                        LogicalName="Locara.UnityRtlFix.dll" />
+    </ItemGroup>
+  </Target>
   <ItemGroup>
     <EmbeddedResource Include="Fonts/NotoSansArabic-Regular.ttf" LogicalName="Locara.NotoSansArabic" />
     <EmbeddedResource Include="Fonts/NotoSansArabic-Bold.ttf" LogicalName="Locara.NotoSansArabicBold" />

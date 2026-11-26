@@ -81,6 +81,85 @@ public sealed class UnrealStringTableFormat : IFormatHandler
     internal static bool IsStringTableHeader(ReadOnlySpan<byte> uasset) =>
         TryInspectUassetHeader(uasset, out _, out _, out _);
 
+    /// <summary>
+    /// Fast zero-false-negative prefix filter for multi-block .uasset entries inside .pak archives.
+    /// Returns false only when the package header is invalid or the entire NameMap fits inside <paramref name="prefix"/>
+    /// without referencing "StringTable".
+    /// </summary>
+    internal static bool CouldBeStringTablePrefix(ReadOnlySpan<byte> prefix, long fullLength)
+    {
+        if (prefix.Length >= fullLength)
+            return IsStringTableHeader(prefix);
+        if (prefix.Length < 64)
+            return false;
+        if (BinaryPrimitives.ReadUInt32LittleEndian(prefix) != PackageFileTag)
+            return false;
+
+        int legacyVer = BinaryPrimitives.ReadInt32LittleEndian(prefix[4..]);
+        if (legacyVer is > -6 or < -9) return false;
+
+        int pos = 8;
+        if (legacyVer != -4) pos += 4;
+        if (pos + 16 > prefix.Length) return false;
+        int ue4Ver = BinaryPrimitives.ReadInt32LittleEndian(prefix[pos..]); pos += 4;
+        int ue5Ver = 0;
+        if (legacyVer <= -8)
+        {
+            ue5Ver = BinaryPrimitives.ReadInt32LittleEndian(prefix[pos..]);
+            pos += 4;
+        }
+        pos += 4; // FileVersionLicenseeUE
+
+        int totalHeaderSize;
+        if (ue5Ver >= 1012)
+        {
+            if (pos + 28 > prefix.Length) return true;
+            pos += 20;
+            totalHeaderSize = BinaryPrimitives.ReadInt32LittleEndian(prefix[pos..]); pos += 4;
+            int customCount = BinaryPrimitives.ReadInt32LittleEndian(prefix[pos..]); pos += 4;
+            if (customCount < 0 || customCount > 4096) return false;
+            if (pos + customCount * 20 > prefix.Length) return true;
+            pos += customCount * 20;
+        }
+        else
+        {
+            if (pos + 8 > prefix.Length) return true;
+            int customCount = BinaryPrimitives.ReadInt32LittleEndian(prefix[pos..]); pos += 4;
+            if (customCount < 0 || customCount > 4096) return false;
+            if (pos + customCount * 20 + 4 > prefix.Length) return true;
+            pos += customCount * 20;
+            totalHeaderSize = BinaryPrimitives.ReadInt32LittleEndian(prefix[pos..]); pos += 4;
+        }
+
+        if (totalHeaderSize <= 0 || totalHeaderSize > fullLength) return false;
+        if (!UnrealLocresFormat.TryReadFString(prefix, ref pos, out _)) return true;
+        if (pos + 12 > prefix.Length) return true;
+        pos += 4; // PackageFlags
+        int nameCount = BinaryPrimitives.ReadInt32LittleEndian(prefix[pos..]); pos += 4;
+        int nameOffset = BinaryPrimitives.ReadInt32LittleEndian(prefix[pos..]); pos += 4;
+
+        if (nameCount <= 0 || nameCount > 100_000 || nameOffset <= 0 || nameOffset >= totalHeaderSize)
+            return false;
+        if (nameOffset >= prefix.Length)
+            return true;
+
+        bool hasHashes = ue4Ver >= 504 || legacyVer <= -8;
+        int npos = nameOffset;
+        for (int i = 0; i < nameCount; i++)
+        {
+            if (!UnrealLocresFormat.TryReadFString(prefix, ref npos, out string name))
+                return true;
+            if (hasHashes)
+            {
+                if (npos + 4 > prefix.Length) return true;
+                npos += 4;
+            }
+            if (name.Equals("StringTable", StringComparison.Ordinal))
+                return true;
+        }
+        return false;
+    }
+
     internal static (byte[] Uasset, byte[]? Uexp, bool Changed) ApplyPair(
         byte[] uasset,
         byte[]? uexp,

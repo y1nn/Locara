@@ -151,6 +151,15 @@ public static class PackageInstaller
             updatedExisting = true;
         }
 
+        // If the user previously installed the standalone RTL plugin and now deploys with IncludeClassicUnityRtlPlugin,
+        // fold the standalone plugin cleanly into the unified in-place receipt so there is no duplicate file conflict.
+        var projSettingsForDeploy = new ProjectSettings(project);
+        if (projSettingsForDeploy.IncludeClassicUnityRtlPlugin
+            && UnityClassicRtlPlugin.Inspect(project, cancellation).Status == UnityRtlPluginStatus.InstalledStandalone)
+        {
+            UnityClassicRtlPlugin.UninstallStandalone(project, cancellation);
+        }
+
         var service = new ProjectService(project);
         var plan = service.Preview(final, password, cancellation);
         if (plan.ChangedFiles.Count == 0)
@@ -242,6 +251,9 @@ public static class PackageInstaller
     internal static InstallResult InstallGenericTrial(string package, string target, string journal,
         Action verifyClosed, CancellationToken cancellation) =>
         InstallVerified(package, target, cancellation, verifyClosed: verifyClosed, receiptOverride: journal);
+
+    internal static InstallResult InstallToReceipt(string package, string target, string receiptDirectory, CancellationToken cancellation) =>
+        InstallVerified(package, target, cancellation, verifyClosed: () => RequireGameClosed(target), receiptOverride: receiptDirectory);
 
     private static InstallResult InstallVerified(string package, string copy, CancellationToken cancellation,
         string? source = null, string? journal = null, Action? verifyClosed = null, string? receiptOverride = null)
