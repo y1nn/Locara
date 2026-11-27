@@ -12,6 +12,7 @@ public partial class MainWindow
     private static string CustomFontsDir => Path.Combine(UserData, "fonts");
     private static string FontPreviewCacheDir => Path.Combine(UserData, "font-preview-cache");
     private bool loadingDisplayFont;
+    private FontFamily? activePreviewFontFamily;
 
     private void LoadDisplayFontSelector(string? savedFontId, string? savedUnityWrap = null, string? savedUnityScale = null, string? savedUnityShaping = null, string? savedUnityContrast = null)
     {
@@ -177,6 +178,7 @@ public partial class MainWindow
                 FontPreviewTitle.FontFamily = family;
                 FontPreviewBody.FontFamily = family;
                 FontPreviewMenu.FontFamily = family;
+                activePreviewFontFamily = family;
             }
         }
         catch (Exception error)
@@ -184,6 +186,7 @@ public partial class MainWindow
             FontCompatibilityStatus.Text = "تعذّرت معاينة الخط: " + error.Message;
             FontCompatibilityStatus.SetResourceReference(TextBlock.ForegroundProperty, "DangerFg");
         }
+        RefreshEditorLivePreview();
     }
 
     private static FontFamily? TryLoadWpfFontFamily(string fontFilePath, string fallbackFamilyName)

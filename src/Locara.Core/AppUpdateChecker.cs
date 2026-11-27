@@ -147,12 +147,20 @@ public sealed record ReleaseCheckResult(
     string? LatestTag = null,
     string? ReleaseName = null,
     Uri? ReleaseUrl = null,
-    DateTimeOffset? PublishedAt = null)
+    DateTimeOffset? PublishedAt = null,
+    Uri? PackageAssetUrl = null,
+    Uri? Sha256AssetUrl = null,
+    long? PackageAssetSize = null)
 {
     public bool IsUpdateAvailable =>
         Status == ReleaseCheckStatus.UpdateAvailable
         && LatestVersion is not null
         && ReleaseUrl is not null;
+
+    public bool CanSelfUpdate =>
+        IsUpdateAvailable
+        && PackageAssetUrl is not null
+        && Sha256AssetUrl is not null;
 }
 
 /// <summary>
@@ -163,8 +171,11 @@ public static class AppUpdateChecker
 {
     public const string RepositoryOwner = "y1nn";
     public const string RepositoryName = "Locara";
+    public const string WindowsPackageAssetName = "Locara-windows-x64.zip";
+    public const string WindowsPackageSha256AssetName = "Locara-windows-x64.zip.sha256";
     private const int MaxResponseBytes = 256 * 1024;
-    private const string TrustedReleasePathPrefix = $"/y1nn/Locara/releases/";
+    private const string TrustedReleasePathPrefix = "/y1nn/Locara/releases/";
+    private const string TrustedReleaseDownloadPathPrefix = "/y1nn/Locara/releases/download/";
 
     public static readonly Uri LatestReleaseApiUri =
         new($"https://api.github.com/repos/{RepositoryOwner}/{RepositoryName}/releases/latest");
@@ -239,11 +250,64 @@ public static class AppUpdateChecker
         if (!uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)) return false;
         if (!uri.IsDefaultPort) return false;
         if (!string.IsNullOrEmpty(uri.UserInfo)) return false;
+        if (HasPathTraversal(uri)) return false;
 
         string path = uri.AbsolutePath;
-        if (path.Contains("..", StringComparison.Ordinal)) return false;
         return path.StartsWith(TrustedReleasePathPrefix, StringComparison.OrdinalIgnoreCase)
             || path.Equals("/y1nn/Locara/releases", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsTrustedReleaseAssetUrl(Uri? uri)
+    {
+        if (uri is null || !uri.IsAbsoluteUri) return false;
+        if (!uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)) return false;
+        if (!uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)) return false;
+        if (!uri.IsDefaultPort) return false;
+        if (!string.IsNullOrEmpty(uri.UserInfo)) return false;
+        if (HasPathTraversal(uri)) return false;
+
+        string path = uri.AbsolutePath;
+        if (!path.StartsWith(TrustedReleaseDownloadPathPrefix, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        ReadOnlySpan<char> remainder = path.AsSpan(TrustedReleaseDownloadPathPrefix.Length);
+        return EndsWithNonEmptySegmentAndAsset(remainder, WindowsPackageAssetName)
+            || EndsWithNonEmptySegmentAndAsset(remainder, WindowsPackageSha256AssetName);
+    }
+
+    public static bool IsTrustedDownloadRedirectUrl(Uri? uri)
+    {
+        if (uri is null || !uri.IsAbsoluteUri) return false;
+        if (!uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)) return false;
+        if (!uri.IsDefaultPort) return false;
+        if (!string.IsNullOrEmpty(uri.UserInfo)) return false;
+        if (HasPathTraversal(uri)) return false;
+
+        if (uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
+            return uri.AbsolutePath.StartsWith(TrustedReleasePathPrefix, StringComparison.OrdinalIgnoreCase);
+
+        return uri.Host.Equals("objects.githubusercontent.com", StringComparison.OrdinalIgnoreCase)
+            || uri.Host.Equals("release-assets.githubusercontent.com", StringComparison.OrdinalIgnoreCase)
+            || uri.Host.Equals("github-releases.githubusercontent.com", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasPathTraversal(Uri uri)
+    {
+        if (uri.AbsolutePath.Contains("..", StringComparison.Ordinal))
+            return true;
+
+        string raw = uri.OriginalString;
+        int queryOrFragment = raw.IndexOfAny(['?', '#']);
+        ReadOnlySpan<char> pathPart = queryOrFragment >= 0 ? raw.AsSpan(0, queryOrFragment) : raw.AsSpan();
+        return pathPart.Contains("..", StringComparison.Ordinal)
+            || pathPart.Contains("%2e%2e", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool EndsWithNonEmptySegmentAndAsset(ReadOnlySpan<char> remainder, string assetName)
+    {
+        int slashIndex = remainder.LastIndexOf('/');
+        if (slashIndex <= 0) return false;
+        return remainder[(slashIndex + 1)..].Equals(assetName, StringComparison.OrdinalIgnoreCase);
     }
 
     public static ReleaseCheckResult ParseLatestReleaseJson(string json, SemanticVersion currentVersion)
@@ -294,6 +358,50 @@ public static class AppUpdateChecker
                 publishedAt = dto;
             }
 
+            Uri? packageAssetUrl = null;
+            Uri? sha256AssetUrl = null;
+            long? packageAssetSize = null;
+            if (root.TryGetProperty("assets", out var assetsProp) && assetsProp.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var asset in assetsProp.EnumerateArray())
+                {
+                    if (asset.ValueKind != JsonValueKind.Object) continue;
+                    if (!asset.TryGetProperty("name", out var assetNameProp) || assetNameProp.ValueKind != JsonValueKind.String)
+                        continue;
+                    if (!asset.TryGetProperty("browser_download_url", out var downloadUrlProp) || downloadUrlProp.ValueKind != JsonValueKind.String)
+                        continue;
+
+                    string assetName = assetNameProp.GetString() ?? "";
+                    string rawDownloadUrl = (downloadUrlProp.GetString() ?? "").Trim();
+
+                    if (assetName.Equals(WindowsPackageAssetName, StringComparison.Ordinal))
+                    {
+                        if (Uri.TryCreate(rawDownloadUrl, UriKind.Absolute, out var candidateUri)
+                            && IsTrustedReleaseAssetUrl(candidateUri)
+                            && candidateUri.AbsolutePath.EndsWith("/" + WindowsPackageAssetName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            packageAssetUrl = candidateUri;
+                            if (asset.TryGetProperty("size", out var sizeProp)
+                                && sizeProp.ValueKind == JsonValueKind.Number
+                                && sizeProp.TryGetInt64(out long sizeVal)
+                                && sizeVal > 0)
+                            {
+                                packageAssetSize = sizeVal;
+                            }
+                        }
+                    }
+                    else if (assetName.Equals(WindowsPackageSha256AssetName, StringComparison.Ordinal))
+                    {
+                        if (Uri.TryCreate(rawDownloadUrl, UriKind.Absolute, out var candidateUri)
+                            && IsTrustedReleaseAssetUrl(candidateUri)
+                            && candidateUri.AbsolutePath.EndsWith("/" + WindowsPackageSha256AssetName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            sha256AssetUrl = candidateUri;
+                        }
+                    }
+                }
+            }
+
             bool isNewer = latestVersion > currentVersion;
             return new ReleaseCheckResult(
                 isNewer ? ReleaseCheckStatus.UpdateAvailable : ReleaseCheckStatus.UpToDate,
@@ -302,7 +410,10 @@ public static class AppUpdateChecker
                 rawTag,
                 releaseName,
                 releaseUrl,
-                publishedAt);
+                publishedAt,
+                packageAssetUrl,
+                sha256AssetUrl,
+                packageAssetSize);
         }
         catch (JsonException)
         {

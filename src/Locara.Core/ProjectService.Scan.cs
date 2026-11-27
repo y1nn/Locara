@@ -183,7 +183,7 @@ public sealed partial class ProjectService
             {
                 "unity" => "هذه لعبة Unity مجمّعة ولا تحتوي على ملفات نصوص مفتوحة؛ نصوصها محزومة داخل حزم ثنائية (.bundle / .assets مثل localization-string-tables-*.bundle) وتحتاج أداة فك حزم Unity أولاً. (تجاهل Locara ملفات محرك Unity الداخلية مثل RuntimeInitializeOnLoads.json تلقائياً لحماية اللعبة وتوفير رصيدك).",
                 "unreal" => "هذه لعبة Unreal Engine مجمّعة ولم يُعثر فيها على ملفات .locres أو جداول StringTable غير مشفّرة داخل حزم .pak (إذا كانت الحزم مشفّرة بمفتاح AES يمكنك إدخال المفتاح في الخيارات المتقدمة ثم إعادة الفحص).",
-                "gamemaker" => "هذه لعبة GameMaker مجمّعة وتخزّن نصوصها داخل حزمة data.win (مقطع STRG) دون ملفات ترجمة خارجية مفتوحة (JSON/CSV/INI/PO/TOML/Lua).",
+                "gamemaker" => "هذه لعبة GameMaker ولم يُعثر فيها على نصوص بشرية قابلة للترجمة داخل data.win (مقطع STRG) ولا في ملفات خارجية مفتوحة (JSON/CSV/INI/PO/TOML/Lua). قد تكون نصوصها مضمّنة في الشيفرة أو مشفّرة.",
                 _ when customArchives.Count > 0 => $"لم يُعثر على ملفات ترجمة مفتوحة. يحتوي المجلد على حزم ثنائية مخصّصة ({string.Join("، ", customArchives)}) — يُرجّح أن اللعبة تستخدم محركاً خاصاً وتخزّن نصوصها داخل ملفات مجمّعة أو مشفّرة غير قياسية.",
                 _ => "لم يُعثر على موارد نصية مدعومة في المصدر المختار."
             };

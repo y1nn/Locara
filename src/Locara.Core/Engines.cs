@@ -49,7 +49,7 @@ public static class Engines
             (_,_)=>true,"Generate Arabic translation templates in the matching Ren'Py SDK, edit game/tl/arabic, and copy the returned templates back to that language directory."),
         new EngineProfile("unity",r=>r.Any(x=>UnityDataMarker.IsMatch(x)),(_,_)=>true,"لعبة Unity — يدعم Locara حزم Addressables (.bundle) وI2 Localization وTextAsset داخل resources/sharedassets/data.unity3d مع حقن خط TextMeshPro العربي تلقائياً وخيار تصدير XUnity.AutoTranslator."),
         new EngineProfile("unreal",r=>r.Any(x=>UnrealPakMarker.IsMatch(x)),(_,_)=>true,"لعبة Unreal Engine 4/5 — يقرأ Locara نصوص .locres وجداول StringTable (.uasset) مباشرة من حزم .pak أو المجلدات ويولّد حزمة تعديل جاهزة (*_Locara_P.pak) أو يحدّث حزم UE5 IoStore بالتدفق المباشر مع حقن الخط العربي الثنائي."),
-        new EngineProfile("gamemaker",r=>r.Any(x=>GameMakerMarker.IsMatch(x)),(_,_)=>true,"لعبة GameMaker — يدعم Locara ملفات الترجمة الخارجية المصاحبة (JSON/CSV/INI/PO/TOML/Lua) مع التثبيت الموثّق وتجربة Steam."),
+        new EngineProfile("gamemaker",r=>r.Any(x=>GameMakerMarker.IsMatch(x)),(_,_)=>true,"لعبة GameMaker — يدعم Locara استخراج وإعادة بناء نصوص مقطع STRG مباشرةً داخل data.win / game.unx / game.ios بالإضافة إلى ملفات الترجمة الخارجية (JSON/CSV/INI/PO/TOML/Lua) مع التثبيت الموثّق ببصمة SHA-256 وتجربة Steam."),
         new EngineProfile("generic",_=>true,(_,_)=>true,"Inspect the output manifest, then integrate resources using the game's documented language loading path.")
     ];
     public static IEngineProfile Resolve(string name, IReadOnlyList<string> resources, string source = "") =>

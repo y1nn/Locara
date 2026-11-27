@@ -9,6 +9,7 @@ public partial class MainWindow
 {
     private bool updatingGettextTarget;
     private bool updatingRtlPluginOption;
+    private bool updatingGameMakerShape;
     private int directInstallRefreshRequest;
 
     private async void RefreshDirectInstallStatus()
@@ -22,9 +23,12 @@ public partial class MainWindow
             AcceptGameUpdateButton.Visibility = Visibility.Collapsed;
             if (GettextPoTargetBorder != null) GettextPoTargetBorder.Visibility = Visibility.Collapsed;
             if (UnityClassicRtlPluginBorder != null) UnityClassicRtlPluginBorder.Visibility = Visibility.Collapsed;
+            if (GameMakerSettingsBorder != null) GameMakerSettingsBorder.Visibility = Visibility.Collapsed;
+            ResetQaGateUi();
             return;
         }
         string path = projectPath;
+        RefreshQaGate();
         var result = await Task.Run(() =>
         {
             try
@@ -41,17 +45,19 @@ public partial class MainWindow
                     ? UnityClassicRtlPlugin.Inspect(project)
                     : null;
                 bool includeRtlPlugin = projSettings.IncludeClassicUnityRtlPlugin;
-                return (Destination: destination, State: state, Engine: engine, HasActivePot: hasActivePot, SiblingPos: siblingPos, SavedPoTarget: savedPoTarget, RtlPlugin: rtlInspection, IncludeRtlPlugin: includeRtlPlugin, Error: (string?)null);
+                bool gameMakerShape = projSettings.GameMakerShapeArabic;
+                return (Destination: destination, State: state, Engine: engine, HasActivePot: hasActivePot, SiblingPos: siblingPos, SavedPoTarget: savedPoTarget, RtlPlugin: rtlInspection, IncludeRtlPlugin: includeRtlPlugin, GameMakerShape: gameMakerShape, Error: (string?)null);
             }
             catch (Exception error)
             {
-                return (Destination: "", State: (InPlaceInstallState?)null, Engine: "", HasActivePot: false, SiblingPos: new List<string>(), SavedPoTarget: "", RtlPlugin: (UnityRtlPluginInspection?)null, IncludeRtlPlugin: false, Error: (string?)error.Message);
+                return (Destination: "", State: (InPlaceInstallState?)null, Engine: "", HasActivePot: false, SiblingPos: new List<string>(), SavedPoTarget: "", RtlPlugin: (UnityRtlPluginInspection?)null, IncludeRtlPlugin: false, GameMakerShape: false, Error: (string?)error.Message);
             }
         });
 
         if (!IsLoaded || request != directInstallRefreshRequest || projectPath != path) return;
-        var (destination, state, engine, hasActivePot, siblingPos, savedPoTarget, rtlPlugin, includeRtlPlugin, error) = result;
+        var (destination, state, engine, hasActivePot, siblingPos, savedPoTarget, rtlPlugin, includeRtlPlugin, gameMakerShape, error) = result;
         bool showUnityTmp = engine.Equals("unity", StringComparison.OrdinalIgnoreCase);
+        ApplyGameMakerSettingsUi(engine, gameMakerShape);
         UnityTmpSettingsBorder.Visibility = showUnityTmp ? Visibility.Visible : Visibility.Collapsed;
         ApplyUnityRtlPluginUi(showUnityTmp, destination, rtlPlugin, includeRtlPlugin);
         PopulateGettextPoTargetSelector(hasActivePot, siblingPos, savedPoTarget);
@@ -113,6 +119,31 @@ public partial class MainWindow
             DirectRestoreButton.Visibility = Visibility.Visible;
             AcceptGameUpdateButton.Visibility = Visibility.Collapsed;
         }
+    }
+
+    private void ApplyGameMakerSettingsUi(string engine, bool shapeArabic)
+    {
+        if (GameMakerSettingsBorder == null || GameMakerShapeArabicToggle == null) return;
+        bool isGameMaker = engine.Equals("gamemaker", StringComparison.OrdinalIgnoreCase);
+        GameMakerSettingsBorder.Visibility = isGameMaker ? Visibility.Visible : Visibility.Collapsed;
+        updatingGameMakerShape = true;
+        try { GameMakerShapeArabicToggle.IsChecked = shapeArabic; }
+        finally { updatingGameMakerShape = false; }
+    }
+
+    private void SelectGameMakerShapeArabic(object sender, RoutedEventArgs e)
+    {
+        if (updatingGameMakerShape || projectPath == null) return;
+        bool shape = GameMakerShapeArabicToggle.IsChecked == true;
+        try
+        {
+            using var project = new ProjectStore(projectPath);
+            new ProjectSettings(project).GameMakerShapeArabic = shape;
+            Status.Text = shape
+                ? "سيُشكَّل النص العربي مسبقاً عند بناء data.win — فعّله فقط إذا كان خط اللعبة لا يدعم الربط."
+                : "سيُحفظ النص العربي منطقياً (UTF-8) في data.win — الوضع الافتراضي الموصى به.";
+        }
+        catch (Exception error) { Status.Text = error.Message; }
     }
 
     private void ApplyUnityRtlPluginUi(bool isUnity, string destination, UnityRtlPluginInspection? inspection, bool includeInPackage)
@@ -342,7 +373,7 @@ public partial class MainWindow
         string path = projectPath, password = ZipPassword.Password;
         if (!TrySyncSourceAdvancedSettings(path)) return;
 
-        (string Destination, string? Running, InPlaceInstallState? Existing, string Engine, string FontName, UnityArabicDisplayOptions UnityDisplay) precheck;
+        (string Destination, string? Running, InPlaceInstallState? Existing, string Engine, string FontName, UnityArabicDisplayOptions UnityDisplay, PreBuildQaReport? Qa) precheck;
         try
         {
             precheck = await Task.Run(() =>
@@ -355,7 +386,10 @@ public partial class MainWindow
                 string engine = projSettings.ScannedEngine;
                 var font = projSettings.ResolveDisplayFont(CustomFontsDir);
                 var unityDisplay = projSettings.ResolveUnityDisplayOptions();
-                return (Destination: destination, Running: running, Existing: existing, Engine: engine, FontName: font.DisplayName, UnityDisplay: unityDisplay);
+                PreBuildQaReport? qa = null;
+                try { qa = PreBuildQaGate.Evaluate(project); }
+                catch (Exception) { /* QA summary is advisory; never block the install flow on a gate failure. */ }
+                return (Destination: destination, Running: running, Existing: existing, Engine: engine, FontName: font.DisplayName, UnityDisplay: unityDisplay, Qa: qa);
             });
         }
         catch (Exception error)
@@ -386,6 +420,7 @@ public partial class MainWindow
             return;
         }
 
+        if (precheck.Qa != null) ApplyQaReport(precheck.Qa);
         bool isUpdate = precheck.Existing != null;
         string heading = isUpdate ? "تأكيد تحديث التثبيت الدائم" : "تأكيد التثبيت النهائي داخل اللعبة";
         string actionDesc = isUpdate
@@ -399,9 +434,12 @@ public partial class MainWindow
             $"• مسار اللعبة التلقائي:\n{precheck.Destination}\n" +
             $"• الخط المختار (عند دعم المحرك): {precheck.FontName}{unityLine}\n\n" +
             "يمكنك في أي وقت استعادة اللعبة الأصلية بضغطة واحدة من زر «إزالة التعريب واستعادة الأصل».";
+        confirmText += BuildQaConfirmSection(precheck.Qa);
 
-        if (MessageBox.Show(this, confirmText, heading, MessageBoxButton.YesNo,
-                MessageBoxImage.Question, MessageBoxResult.Yes) != MessageBoxResult.Yes)
+        bool qaBlocked = precheck.Qa is { HasBlockers: true };
+        if (MessageBox.Show(this, confirmText, qaBlocked ? heading + " — ⛔ أخطاء حرجة" : heading, MessageBoxButton.YesNo,
+                qaBlocked ? MessageBoxImage.Warning : MessageBoxImage.Question,
+                qaBlocked ? MessageBoxResult.No : MessageBoxResult.Yes) != MessageBoxResult.Yes)
             return;
 
         await Run(async ct =>

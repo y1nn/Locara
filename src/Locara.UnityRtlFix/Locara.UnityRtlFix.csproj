@@ -3,7 +3,7 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <AssemblyName>Locara.UnityRtlFix</AssemblyName>
     <RootNamespace>Locara.UnityRtlFix</RootNamespace>
-    <Version>1.4.0</Version>
+    <Version>1.5.0</Version>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
