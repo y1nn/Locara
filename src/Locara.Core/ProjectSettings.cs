@@ -113,6 +113,19 @@ public sealed class ProjectSettings(ProjectStore store)
         set => store.Set("unity_classic_rtl_plugin", value ? "true" : "false");
     }
 
+    /// <summary>
+    /// GameMaker <c>data.win</c> optional build-time Arabic pre-shaping. Default <c>false</c>: logical UTF-8 text.
+    /// </summary>
+    public bool GameMakerShapeArabic
+    {
+        get
+        {
+            string raw = store.Get("gamemaker_shape_arabic");
+            return raw == "true" || raw == "1";
+        }
+        set => store.Set("gamemaker_shape_arabic", value ? "true" : "false");
+    }
+
     public UnityArabicDisplayOptions ResolveUnityDisplayOptions() =>
         UnityArabicDisplayOptions.Parse(
             store.Get("unity_arabic_wrap"),

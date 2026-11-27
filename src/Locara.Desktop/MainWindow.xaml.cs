@@ -145,6 +145,7 @@ public partial class MainWindow:Window
             capabilityKey = null;
             capability = null;
             ResetGlossaryAuditState();
+            ResetQaGateState();
             loadingSharedMemoryPref = true;
             try
             {
@@ -228,10 +229,12 @@ public partial class MainWindow:Window
     private List<RecentProject>? latestRecent;
 
     private sealed record EditorPageData(List<Unit> Rows, string Engine);
-    private static EditorPageData ReadEditorPage(ProjectStore project, EditorView view, IReadOnlySet<string>? glossaryIds = null)
+    private static bool IsUnitIdSetFilter(string filter) => filter is "glossary" or "length";
+
+    private static EditorPageData ReadEditorPage(ProjectStore project, EditorView view, IReadOnlySet<string>? filterUnitIds = null)
     {
-        var rows = view.Filter == "glossary"
-            ? project.UnitsByIds(glossaryIds ?? (IReadOnlySet<string>)new HashSet<string>(), view.Search, view.Offset)
+        var rows = IsUnitIdSetFilter(view.Filter)
+            ? project.UnitsByIds(filterUnitIds ?? (IReadOnlySet<string>)new HashSet<string>(), view.Search, view.Offset)
             : project.Units(view.Search, view.Offset, status: view.Filter);
         return new(rows, new ProjectSettings(project).ScannedEngine);
     }
@@ -241,9 +244,12 @@ public partial class MainWindow:Window
         if (projectPath == null) return;
         string path = projectPath;
         var view = new EditorView(Search.Text, ReviewStatus, offset);
-        HashSet<string>? glossaryIds = view.Filter == "glossary"
-            ? glossaryViolationsById.Keys.ToHashSet(StringComparer.Ordinal)
-            : null;
+        HashSet<string>? glossaryIds = view.Filter switch
+        {
+            "glossary" => glossaryViolationsById.Keys.ToHashSet(StringComparer.Ordinal),
+            "length" => new HashSet<string>(lengthWarningUnitIds, StringComparer.Ordinal),
+            _ => null
+        };
         int request = ++editorRequest;
         Rows.IsEnabled = false;
         PageInfo.Text = "جارٍ تحميل النصوص…";
@@ -255,7 +261,7 @@ public partial class MainWindow:Window
             {
                 using var project = new ProjectStore(path);
                 var data = ReadEditorPage(project, view, glossaryIds);
-                if (rememberView && view.Filter != "glossary")
+                if (rememberView && !IsUnitIdSetFilter(view.Filter))
                     new ProjectSettings(project).SetEditorViewRaw(JsonSerializer.Serialize(view));
                 return data;
             });

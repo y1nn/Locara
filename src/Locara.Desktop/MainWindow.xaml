@@ -65,7 +65,7 @@
 
     <!-- Bottom Settings & API Footer -->
     <StackPanel DockPanel.Dock="Bottom">
-     <Button x:Name="UpdateAvailableBadge" Click="OpenAvailableUpdateClick" Visibility="Collapsed"
+     <Button x:Name="UpdateAvailableBadge" Click="UpdateBadgeClick" Visibility="Collapsed"
              Background="{DynamicResource AccentSoft}" BorderBrush="{DynamicResource AccentIndicator}"
              Foreground="{DynamicResource AccentIndicator}" BorderThickness="1"
              Padding="10,7" Margin="0,0,0,8" HorizontalContentAlignment="Stretch"
@@ -867,6 +867,8 @@
                <Button Content="حفظ في المعجم" Click="SaveTerm"/>
                <Button Content="فحص اتّساق المعجم" Click="RunGlossaryAuditClick"/>
                <Button Content="حذف المحدد" Click="DeleteTerm" Style="{StaticResource GhostButtonStyle}"/>
+                <Button Content="تصدير المعجم (JSON/CSV)" Click="ExportGlossaryClick"/>
+                <Button Content="استيراد معجم" Click="ImportGlossaryClick"/>
               </WrapPanel>
              </StackPanel>
             </StackPanel>
@@ -946,6 +948,7 @@
           <ComboBoxItem Content="المسودات" Tag="translated"/>
           <ComboBoxItem Content="التعارضات" Tag="conflict"/>
           <ComboBoxItem Content="مخالفات المعجم" Tag="glossary"/>
+           <ComboBoxItem Content="تحذيرات الطول" Tag="length"/>
          </ComboBox>
 
          <RadioButton x:Name="EditorChipAll" GroupName="EditorFilterChips" Style="{StaticResource FilterChipRadioStyle}" Tag="" IsChecked="True" Click="EditorFilterChipClick" Content="الكل"/>
@@ -954,6 +957,7 @@
          <RadioButton x:Name="EditorChipIssues" GroupName="EditorFilterChips" Style="{StaticResource FilterChipRadioStyle}" Tag="issues" Click="EditorFilterChipClick" Content="تنبيهات"/>
          <RadioButton x:Name="EditorChipApproved" GroupName="EditorFilterChips" Style="{StaticResource FilterChipRadioStyle}" Tag="approved" Click="EditorFilterChipClick" Content="معتمدة"/>
          <RadioButton x:Name="EditorChipGlossary" GroupName="EditorFilterChips" Style="{StaticResource FilterChipRadioStyle}" Tag="glossary" Click="EditorFilterChipClick" Content="مخالفات المعجم" Visibility="Collapsed"/>
+          <RadioButton x:Name="EditorChipLength" GroupName="EditorFilterChips" Style="{StaticResource FilterChipRadioStyle}" Tag="length" Click="EditorFilterChipClick" Content="تحذيرات الطول" Visibility="Collapsed"/>
          <Button x:Name="EditorGlossaryAuditBtn" Content="فحص المعجم" Click="RunGlossaryAuditClick" Padding="10,5" FontSize="12" Margin="6,0,0,0" ToolTip="فحص اتّساق السطور المترجمة مع المعجم اليدوي"/>
         </WrapPanel>
 
@@ -972,6 +976,9 @@
            <MenuItem Header="تصدير النطاق إلى CSV" Click="ExportReview"/>
            <MenuItem Header="استيراد مراجعة CSV" Click="ImportReview"/>
            <MenuItem Header="نسخ المشروع احتياطياً" Click="BackupProject"/>
+            <Separator/>
+            <MenuItem Header="تصدير حزمة تعريب خفيفة (.locara-patch.json)" Click="ExportPatchClick"/>
+            <MenuItem Header="استيراد حزمة تعريب خفيفة" Click="ImportPatchClick"/>
           </MenuItem>
          </Menu>
         </StackPanel>
@@ -1112,7 +1119,30 @@
            </StackPanel>
           </Border>
 
-          <WrapPanel Margin="0,10,0,10">
+          <!-- Live In-Game Arabic Preview -->
+           <Border x:Name="InspectorLivePreviewCard" Background="{DynamicResource BgSubtle}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="7" Padding="10,8" Margin="0,8,0,0">
+            <StackPanel>
+             <TextBlock Text="معاينة حيّة داخل اللعبة" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,5"/>
+             <WrapPanel Margin="0,0,0,5">
+              <TextBlock Text="عرض الصندوق (حرف):" FontSize="11.5" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+              <RadioButton x:Name="PreviewWidth30" GroupName="PreviewBoxWidth" Style="{StaticResource FilterChipRadioStyle}" Tag="30" Content="30" FlowDirection="LeftToRight" Click="PreviewBoxWidthClick"/>
+              <RadioButton x:Name="PreviewWidth45" GroupName="PreviewBoxWidth" Style="{StaticResource FilterChipRadioStyle}" Tag="45" Content="45" FlowDirection="LeftToRight" IsChecked="True" Click="PreviewBoxWidthClick"/>
+              <RadioButton x:Name="PreviewWidth60" GroupName="PreviewBoxWidth" Style="{StaticResource FilterChipRadioStyle}" Tag="60" Content="60" FlowDirection="LeftToRight" Click="PreviewBoxWidthClick"/>
+             </WrapPanel>
+             <WrapPanel Margin="0,0,0,5">
+              <RadioButton x:Name="PreviewModeShaped" GroupName="PreviewMode" Style="{StaticResource FilterChipRadioStyle}" Tag="shaped" Content="تشكيل مسبق" IsChecked="True" Click="PreviewModeClick"/>
+              <RadioButton x:Name="PreviewModeLogical" GroupName="PreviewMode" Style="{StaticResource FilterChipRadioStyle}" Tag="logical" Content="عربي أصلي" Click="PreviewModeClick"/>
+             </WrapPanel>
+             <TextBlock x:Name="InspectorLivePreviewSummary" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+             <Border Background="#0A1419" BorderBrush="#24424E" BorderThickness="1.2" CornerRadius="8" Padding="12,9">
+              <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+               <TextBlock x:Name="InspectorLivePreviewText" FlowDirection="LeftToRight" TextAlignment="Right" TextWrapping="NoWrap" Foreground="#F1F6F8" FontSize="14.5" MinHeight="22"/>
+              </ScrollViewer>
+             </Border>
+            </StackPanel>
+           </Border>
+
+           <WrapPanel Margin="0,10,0,10">
            <Button Content="اعتماد السطر ✓" Click="ApproveAndAdvanceClick" Style="{StaticResource PrimaryButtonStyle}" Padding="13,7" Margin="0,0,6,6"/>
            <Button Content="إعادة ترجمة بالبوت" Click="Retranslate" Padding="10,7" Margin="0,0,6,6"/>
            <Button Content="ذاكرة الترجمة" Click="SuggestMemory" Padding="10,7" Margin="0,0,0,6"/>
@@ -1282,7 +1312,17 @@
           </StackPanel>
          </Border>
 
-         <!-- Engine-Conditional: Gettext (.pot -> .po) Target -->
+         <!-- Engine-Conditional: GameMaker data.win Arabic Pre-Shaping (ONLY visible on GameMaker projects) -->
+          <Border x:Name="GameMakerSettingsBorder" Visibility="Collapsed" Style="{StaticResource SubtleCardBorderStyle}" Margin="0,12,0,0">
+           <StackPanel>
+            <TextBlock Text="ضبط العرض العربي لمحرك GameMaker (data.win)" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}" FontSize="13" Margin="0,0,0,6"/>
+            <CheckBox x:Name="GameMakerShapeArabicToggle" IsChecked="False" Checked="SelectGameMakerShapeArabic" Unchecked="SelectGameMakerShapeArabic" FontSize="12">
+             <TextBlock Text="تشكيل الحروف العربية مسبقاً عند البناء في data.win (معطّل افتراضياً — اتركه معطّلاً للعرض بـ UTF-8 المنطقي)" TextWrapping="Wrap"/>
+            </CheckBox>
+           </StackPanel>
+          </Border>
+
+          <!-- Engine-Conditional: Gettext (.pot -> .po) Target -->
          <Border x:Name="GettextPoTargetBorder" Visibility="Collapsed" Style="{StaticResource SubtleCardBorderStyle}" Margin="0,12,0,0">
           <StackPanel>
            <TextBlock Text="هدف تصدير ملفات Gettext (.pot → .po)" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}" FontSize="13" Margin="0,0,0,6"/>
@@ -1295,7 +1335,46 @@
 
        <!-- Left Column (Col 2 in RTL): Smart One-Click Deployment + Standalone Export + Build Log -->
        <StackPanel Grid.Column="2" VerticalAlignment="Top">
-        <!-- Card 2: Smart One-Click In-Place Deployment & Playtest -->
+        <!-- Pre-Build QA Gate -->
+         <Border x:Name="QaGateCard" Style="{StaticResource CardBorderStyle}" Margin="0,0,0,14">
+          <StackPanel>
+           <Grid Margin="0,0,0,4">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="بوابة فحص الجاهزية قبل البناء والتثبيت" FontSize="16.5" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+            <Border Grid.Column="1" x:Name="QaGateBadge" Background="{DynamicResource BgSubtle}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="6" Padding="9,2.5" VerticalAlignment="Center" Margin="8,0,0,0">
+             <TextBlock x:Name="QaGateBadgeText" Text="…" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource TextMuted}"/>
+            </Border>
+           </Grid>
+           <TextBlock x:Name="QaGateSummaryText" Text="يفحص الأخطاء الحرجة وتحذيرات الجودة قبل البناء والتثبيت داخل اللعبة." FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+          <Grid Margin="0,0,0,6">
+           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+           <TextBlock Grid.Column="0" Text="أخطاء الرموز والتعارضات" FontSize="12.5" Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+           <TextBlock Grid.Column="1" x:Name="QaCountIssues" Text="—" FontSize="13" FontWeight="Bold" FlowDirection="LeftToRight" MinWidth="36" TextAlignment="Center" VerticalAlignment="Center" Margin="8,0" Foreground="{DynamicResource TextMuted}"/>
+           <Button Grid.Column="2" x:Name="QaFixIssuesButton" Tag="issues" Content="إصلاح في المحرّر ←" Click="QaGateFixClick" FontSize="11.5" Padding="9,4" Margin="0" IsEnabled="False"/>
+          </Grid>
+          <Grid Margin="0,0,0,6">
+           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+           <TextBlock Grid.Column="0" Text="مخالفات المعجم" FontSize="12.5" Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+           <TextBlock Grid.Column="1" x:Name="QaCountGlossary" Text="—" FontSize="13" FontWeight="Bold" FlowDirection="LeftToRight" MinWidth="36" TextAlignment="Center" VerticalAlignment="Center" Margin="8,0" Foreground="{DynamicResource TextMuted}"/>
+           <Button Grid.Column="2" x:Name="QaFixGlossaryButton" Tag="glossary" Content="إصلاح في المحرّر ←" Click="QaGateFixClick" FontSize="11.5" Padding="9,4" Margin="0" IsEnabled="False"/>
+          </Grid>
+          <Grid Margin="0,0,0,6">
+           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+           <TextBlock Grid.Column="0" Text="غير مترجمة / فارغة" FontSize="12.5" Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+           <TextBlock Grid.Column="1" x:Name="QaCountPending" Text="—" FontSize="13" FontWeight="Bold" FlowDirection="LeftToRight" MinWidth="36" TextAlignment="Center" VerticalAlignment="Center" Margin="8,0" Foreground="{DynamicResource TextMuted}"/>
+           <Button Grid.Column="2" x:Name="QaFixPendingButton" Tag="pending" Content="إصلاح في المحرّر ←" Click="QaGateFixClick" FontSize="11.5" Padding="9,4" Margin="0" IsEnabled="False"/>
+          </Grid>
+          <Grid Margin="0,0,0,6">
+           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+           <TextBlock Grid.Column="0" Text="تحذيرات طول الواجهة" FontSize="12.5" Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+           <TextBlock Grid.Column="1" x:Name="QaCountLength" Text="—" FontSize="13" FontWeight="Bold" FlowDirection="LeftToRight" MinWidth="36" TextAlignment="Center" VerticalAlignment="Center" Margin="8,0" Foreground="{DynamicResource TextMuted}"/>
+           <Button Grid.Column="2" x:Name="QaFixLengthButton" Tag="length" Content="إصلاح في المحرّر ←" Click="QaGateFixClick" FontSize="11.5" Padding="9,4" Margin="0" IsEnabled="False"/>
+          </Grid>
+          <Button x:Name="QaGateRescanButton" Content="إعادة فحص" Click="QaGateRescanClick" Style="{StaticResource GhostButtonStyle}" HorizontalAlignment="Left" Margin="0,4,0,0"/>
+          </StackPanel>
+         </Border>
+
+         <!-- Card 2: Smart One-Click In-Place Deployment & Playtest -->
         <Border Style="{StaticResource CardBorderStyle}">
          <StackPanel>
           <TextBlock Text="2. التثبيت الذكي داخل اللعبة والتجربة" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}"/>
@@ -1327,6 +1406,8 @@
            <Button Content="بناء حزمة معاينة (مسودات)" Click="BuildPreview" Margin="5,0,0,6"/>
            <Button Content="تصدير XUnity (BepInEx)" Click="ExportXUnity" Margin="0,0,5,0" ToolTip="لألعاب Unity ذات النصوص المدمجة في الكود البرمجي"/>
            <Button Content="فتح مجلد آخر ناتج" Click="OpenOutput" Margin="5,0,0,0"/>
+            <Button Content="تصدير حزمة تعريب خفيفة (.locara-patch.json)" Click="ExportPatchClick" Margin="0,6,5,0" ToolTip="ملف JSON صغير يحوي الترجمات المعتمدة فقط للمشاركة"/>
+            <Button Content="استيراد حزمة تعريب خفيفة" Click="ImportPatchClick" Margin="5,6,0,0" ToolTip="دمج حزمة تعريب خفيفة مع معاينة وفحص رموز قبل التطبيق"/>
           </UniformGrid>
 
           <Expander Header="أدوات التثبيت والاستعادة اليدوية المتقدمة" Margin="0,10,0,0">
@@ -1689,15 +1770,24 @@
           </Grid.ColumnDefinitions>
           <TextBlock Grid.Column="0" Text="تحديثات Locara والإصدار" FontSize="16" FontWeight="Bold" VerticalAlignment="Center"/>
           <Border Grid.Column="1" Background="{DynamicResource AccentSoft}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="6" Padding="9,2.5" VerticalAlignment="Center">
-           <TextBlock x:Name="AppCurrentVersionText" Text="v1.4.0" FlowDirection="LeftToRight" FontFamily="{StaticResource MonoFont}" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}"/>
+           <TextBlock x:Name="AppCurrentVersionText" Text="v1.5.0" FlowDirection="LeftToRight" FontFamily="{StaticResource MonoFont}" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource AccentIndicator}"/>
           </Border>
          </Grid>
          <TextBlock Text="يتحقّق Locara بهدوء عند التشغيل من أحدث إصدار رسمي عبر GitHub Releases (y1nn/Locara) بمهلة قصيرة وبدون أي تتبّع أو خوادم خارجية." FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,8"/>
          <CheckBox x:Name="AutoCheckUpdatesCheckBox" IsChecked="True" Checked="AutoCheckUpdatesChanged" Unchecked="AutoCheckUpdatesChanged" Content="التحقق التلقائي الهادئ من التحديثات عند تشغيل البرنامج" Margin="0,0,0,8"/>
          <TextBlock x:Name="UpdateCheckStatusText" Text="التحقق التلقائي مفعّل." FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+          <StackPanel x:Name="SelfUpdateProgressPanel" Visibility="Collapsed" Margin="0,0,0,10">
+           <Grid Margin="0,0,0,4">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" x:Name="SelfUpdateProgressText" FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+            <Button Grid.Column="1" x:Name="SelfUpdateCancelButton" Content="إلغاء التنزيل" Click="CancelSelfUpdateClick" Style="{StaticResource GhostButtonStyle}" Margin="8,0,0,0"/>
+           </Grid>
+           <ProgressBar x:Name="SelfUpdateProgressBar" Height="6" Minimum="0" Maximum="100" Value="0"/>
+          </StackPanel>
          <WrapPanel>
           <Button x:Name="CheckUpdatesNowButton" Content="التحقق من التحديثات الآن" Click="CheckUpdatesNowClick"/>
           <Button x:Name="OpenUpdateReleaseButton" Content="فتح صفحة الإصدار على GitHub ↗" Click="OpenAvailableUpdateClick" Style="{StaticResource OutlineAccentButtonStyle}" Visibility="Collapsed"/>
+           <Button x:Name="SelfUpdateInstallButton" Content="تنزيل وتثبيت التحديث تلقائياً (موثّق بـ SHA-256)" Click="SelfUpdateInstallClick" Style="{StaticResource OutlineAccentButtonStyle}" Visibility="Collapsed"/>
          </WrapPanel>
         </StackPanel>
        </Border>

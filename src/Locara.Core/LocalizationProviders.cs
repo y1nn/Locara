@@ -159,6 +159,16 @@ public static class LocalizationProviderRegistry
                         : new(false);
                 },
                 diskExtractor: (fullPath, _, onDiag, _) => UnityAssetsFormat.ExtractFromFile(fullPath, onDiag)),
+            new StandardFormatProvider(GameMakerDataWinFormat.Instance, new("gamemaker-datawin", IsDedicatedLocalization: true, IsOpenDataFormat: false, IsConfigurable: false, UsesStreamedFileAccess: true,
+                DedicatedScanReason: "مقطع نصوص GameMaker الثنائي (STRG داخل data.win / game.unx / game.ios) — مُفلتر هيكلياً لحماية أسماء الأصول والـ Shaders مع إعادة بناء آمنة ونسخة احتياطية SHA-256."),
+                customProbe: (_, fullPath, _) =>
+                {
+                    if (fullPath == null) return new(true, GameMakerDataWinFormat.Instance);
+                    return GameMakerDataWinFormat.HasTranslatableStrings(fullPath)
+                        ? new(true, GameMakerDataWinFormat.Instance)
+                        : new(false);
+                },
+                diskExtractor: (fullPath, _, _, _) => GameMakerDataWinFormat.ExtractFromFile(fullPath)),
             new StandardFormatProvider(UnrealLocresFormat.Instance, new("unreal-locres", IsDedicatedLocalization: true, IsOpenDataFormat: false, IsConfigurable: false, UsesStreamedFileAccess: false,
                 DedicatedScanReason: "ملف ترجمة Unreal Engine ثنائي (.locres) — يدعم العربية بترميز UTF-16LE أصلياً.")),
             new StandardFormatProvider(UnrealStringTableFormat.Instance, new("unreal-stringtable", IsDedicatedLocalization: true, IsOpenDataFormat: false, IsConfigurable: false, UsesStreamedFileAccess: true,

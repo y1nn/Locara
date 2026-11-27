@@ -75,12 +75,21 @@ public static class DeploymentAdvisor
             notes.Add("يعرض Godot 4 العربية بترميز UTF-8 المنطقي أصلياً؛ تُبنى حزم PCK v2/v3 وملفات .translation الثنائية (RSRC/RSCC) مع الحفاظ على جداول التجزئة.");
         }
 
-        // 4b. GameMaker compiled vs external localization note
-        if (engine == "gamemaker")
+        // 4b. GameMaker native data.win STRG vs external localization note
+        if (engine == "gamemaker" || activeFormats.Contains("gamemaker-datawin"))
         {
-            notes.Add(activeUnits == 0
-                ? "هذه لعبة GameMaker وتخزّن نصوصها داخل حزمة data.win المجمّعة (مقطع STRG) دون ملفات ترجمة خارجية مفتوحة؛ إذا وفّرت اللعبة مجلد لغات خارجي (JSON/CSV/INI/PO) اختره أو فعّل ملفاته من تبويب «الملفات»."
-                : "لعبة GameMaker بملفات ترجمة خارجية — تُبنى الملفات بترميز UTF-8 مع نسخ احتياطي واستعادة بضغطة زر.");
+            if (activeFormats.Contains("gamemaker-datawin"))
+            {
+                notes.Add("يعيد Locara بناء مقطع STRG داخل حزمة data.win / game.unx / game.ios مباشرةً مع الحفاظ على محاذاة TXTR/AUDO ونسخ احتياطي موثّق ببصمة SHA-256 واستعادة بضغطة زر. يُكتب النص العربي افتراضياً بترميز UTF-8 المنطقي (مع خيار تفعيل التشكيل المسبق عند الحاجة)، مع ملاحظة أن الخطوط النقطية المخبوزة (Bitmap) أو خطوط TTF التي لا تتضمّن الحروف العربية قد تحتاج خطاً عربياً في اللعبة.");
+            }
+            else if (activeUnits == 0)
+            {
+                notes.Add("هذه لعبة GameMaker ولم تُستخرج نصوص بشرية مفعّلة من data.win (مقطع STRG) أو من ملفات خارجية؛ إذا وفّرت اللعبة مجلد لغات خارجي (JSON/CSV/INI/PO) اختره أو فعّل ملفاته من تبويب «الملفات».");
+            }
+            else
+            {
+                notes.Add("لعبة GameMaker بملفات ترجمة خارجية — تُبنى الملفات بترميز UTF-8 مع نسخ احتياطي واستعادة بضغطة زر.");
+            }
         }
 
         // 5. Mixed / manual override caution
@@ -98,6 +107,7 @@ public static class DeploymentAdvisor
             (_, var fmts) when hasGettextPotOnly => "gettext-pot-to-po",
             (_, var fmts) when fmts.Contains("po") => "gettext-po",
             (_, var fmts) when fmts.Contains("godot-translation") => "godot-binary-translation",
+            (_, var fmts) when fmts.Contains("gamemaker-datawin") => "gamemaker-datawin",
             ("unity", _) when suggestXUnity => "unity-xunity-overlay",
             ("godot", _) => "godot-pck-or-loose",
             ("gamemaker", _) => activeUnits == 0 ? "gamemaker-compiled-datawin" : "gamemaker-external-files",

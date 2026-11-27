@@ -1,13 +1,13 @@
 # Locara — Maintainer & Developer Reference
 
-Concise engineering reference for maintaining and extending **Locara** (`v1.4.0` baseline, November 2026).
+Concise engineering reference for maintaining and extending **Locara** (`v1.5.0` baseline, November 2026).
 
 ---
 
 ## 1. Build, Test, CI & Publish Commands
 
 - **SDK:** `.NET 10.0.404` pinned in [global.json](../global.json) (`TreatWarningsAsErrors=true`, `RestorePackagesWithLockFile=true`).
-- **Build & Test (`153` xUnit tests):**
+- **Build & Test (`229` xUnit tests):**
   ```powershell
   dotnet build -c Release -p:RestoreLockedMode=true
   dotnet test -c Release --no-build
@@ -42,6 +42,11 @@ Concise engineering reference for maintaining and extending **Locara** (`v1.4.0`
 | `UnityAssetsFormat.cs` | Universal Unity `TextAsset` (`classId=49`) extractor/rewriter (`resources.assets`, `sharedassets*.assets`, `data.unity3d`) |
 | `XUnityAutoTranslator.cs` | `XUnityTranslationFormat` (`.txt` read/write) + `XUnityAutoTranslatorExporter` (`BepInEx/` overlay) |
 | `ArabicTextEngine.cs` / `StarTruckerDisplay.cs` | Engine-agnostic `ArabicTextEngine` facade + native Windows `icu.dll` Arabic shaping, UAX #9 BiDi, and DP tag-safe `WrapArabicParagraph` (atomic `<nobr>`/`<link>`/`<a>` & BBCode `[tag]...[/tag]` spans) |
+| `ArabicPreviewFormatter.cs` | Live In-Game Arabic Preview for the editor inspector card: 30/45/60-character box widths, `PreShaped` (visual order; LRM `\u200E` grapheme-cluster isolation only in `DisplayText`) vs `Logical` modes, `ExceedsBoxWidth` flag |
+| `GameMakerDataWinFormat.cs` | Streamed GameMaker IFF `FORM` (`data.win` / `game.unx` / `game.ios`) `STRG` reader and rebuilder with structural human-string filtering and 128-byte aligned `TXTR`/`AUDO` pointer shifting; optional `gamemaker_shape_arabic` setting (default `false`) |
+| `PreBuildQaGate.cs` | Pre-Build QA Gate: `issues` (blocking), `glossary`, `pending`, `length` categories; Packages-page card, direct-install confirm-dialog warnings, `length` editor filter |
+| `GlossaryExchange.cs` / `LocaraPatchExchange.cs` | Glossary JSON/CSV (`locara-glossary-v1`) and `.locara-patch.json` (`locara-patch-v1`) exchange; `PatchImportWindow` in `Locara.Desktop`; imports default to `imported` status, optional approve checkbox |
+| `AppSelfUpdater.cs` | Verified in-app self-updater: SHA-256 verified `Locara-windows-x64.zip` download, swap + restart script, manual GitHub link always kept |
 | `ArabicFontCatalog.cs` | Bundled OFL 1.1 Arabic fonts, Windows system fonts, custom `.ttf`/`.otf` import, `ResolveBilingual` / `ResolveForUnreal` / `ResolveContrastVariant`, OFL license writer |
 | `UnrealLocresFormat.cs` | Pure-C# UE4/UE5 `.locres` v0–v3 reader/writer (UTF-16LE for Arabic) |
 | `UnrealStringTableFormat.cs` | Pure-C# UE4/UE5 `UStringTable` `.uasset` (standalone and split `.uasset` + `.uexp` pairs) reader/writer |
@@ -64,3 +69,4 @@ Concise engineering reference for maintaining and extending **Locara** (`v1.4.0`
 5. **Godot `PCK v3` & `OptimizedTranslation`:** Preserve `dirBase` at end-of-file, `PACK_REL_FILEBASE`, bare vs `res://` path convention, and `hash_table` / `bucket.size` / `bucket.func` / `elem.key` untouched (`comp_size == uncomp_size`).
 6. **Arabic TMP Wrapping:** `<nobr>`, `<link>`, and `<a>` must remain non-breakable atomic spans across wrapped lines.
 7. **Zero game-specific hacks in new code:** Steam titles are used strictly for QA verification; all new engine pipelines must remain 100% general-purpose, and tracked files must never contain local paths, usernames, or credentials.
+8. **GameMaker `data.win` / `game.unx` / `game.ios` `STRG`:** Stream chunk headers (never load `TXTR`/`AUDO` blobs into memory), keep unmodified `STRG` entries at their exact original offsets, patch shorter/equal edits in place, and append expanded edits with 128-byte alignment while shifting every downstream `TXTR`/`AUDO` pointer (fail fast on unknown post-`STRG` chunks). Only structurally human strings are extractable (never identifiers, resource names, shader code, or paths). Always verify the result via SHA-256 backup through the standard in-place install. Arabic is written as logical UTF-8 unless the optional `gamemaker_shape_arabic` project setting (default `false`) is enabled. This adds no SQLite schema change (still Schema v6).

@@ -407,6 +407,8 @@ public partial class MainWindow
             EditorChipApproved.IsChecked = filter == "approved";
             if (EditorChipGlossary != null)
                 EditorChipGlossary.IsChecked = filter == "glossary";
+            if (EditorChipLength != null)
+                EditorChipLength.IsChecked = filter == "length";
             if (GlossaryAuditBanner != null)
                 GlossaryAuditBanner.Visibility = filter == "glossary" && lastGlossaryAudit is { ViolatingUnitCount: > 0 }
                     ? Visibility.Visible
@@ -467,7 +469,11 @@ public partial class MainWindow
             }
             InspectorNeighborsList.ItemsSource = neighbors;
         }
-        finally { updatingInspector = false; }
+        finally
+        {
+            updatingInspector = false;
+            RefreshEditorLivePreview();
+        }
     }
 
     private void UpdateInspectorTokenAndLengthState(Unit? row, string source, string target, string savedWarning)
@@ -564,6 +570,7 @@ public partial class MainWindow
         if (updatingInspector || Rows.SelectedItem is not Unit row) return;
         row.Target = InspectorTargetBox.Text;
         UpdateInspectorTokenAndLengthState(row, row.Source, row.Target, row.Warning);
+        RefreshEditorLivePreview();
     }
 
     private void InspectorTargetLostFocus(object sender, RoutedEventArgs e)
@@ -1023,6 +1030,7 @@ public partial class MainWindow
             if (!IsLoaded || cancellation.IsCancellationRequested) return;
 
             latestUpdateResult = result;
+            ApplySelfUpdateUi();
             if (result.IsUpdateAvailable)
             {
                 string tag = result.LatestVersion!.Value.ToTagString();
@@ -1030,7 +1038,7 @@ public partial class MainWindow
                     UpdateAvailableBadgeText.Text = $"تحديث متاح · {tag}";
                 if (UpdateAvailableBadge != null)
                 {
-                    UpdateAvailableBadge.ToolTip = $"يتوفر إصدار رسمي أحدث ({tag}) على GitHub — اضغط لفتح صفحة الإصدار";
+                    UpdateAvailableBadge.ToolTip = $"يتوفر إصدار رسمي أحدث ({tag}) — اضغط لفتح إعدادات التحديث (تحديث تلقائي موثّق أو صفحة GitHub)";
                     UpdateAvailableBadge.Visibility = Visibility.Visible;
                 }
                 if (UpdateCheckStatusText != null)

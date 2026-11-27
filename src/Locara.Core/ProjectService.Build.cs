@@ -246,6 +246,33 @@ public sealed partial class ProjectService
                 continue;
             }
 
+            if (format is GameMakerDataWinFormat && !source.IsArchive)
+            {
+                string beforeGm = entry.Hash(cancellation);
+                if (scanned.GetValueOrDefault(key) != beforeGm)
+                    throw new InvalidOperationException("تغير المورد منذ الفحص — " + key);
+                expected[entry.Path] = beforeGm;
+                if (replacements.Count == 0) continue;
+
+                if (reserveStreamedRewrite != null && commitStreamedRewrite != null)
+                {
+                    string stagedPath = reserveStreamedRewrite(entry);
+                    GameMakerDataWinFormat.ApplyToFile(
+                        Path.Combine(source.Path, entry.Path), stagedPath, replacements,
+                        shapeArabic: settings.GameMakerShapeArabic, cancellation: cancellation);
+                    string afterGm = PackageInstaller.FileHash(stagedPath, cancellation);
+                    if (beforeGm == afterGm) continue;
+                    expected[entry.Path] = afterGm;
+                    changes.Add(new(entry.Path, beforeGm, afterGm));
+                    commitStreamedRewrite(entry, stagedPath);
+                }
+                else
+                {
+                    changes.Add(new(entry.Path, beforeGm, beforeGm + ":pending"));
+                }
+                continue;
+            }
+
             if (format is UnrealStringTableFormat && !source.IsArchive)
             {
                 string beforeUa = entry.Hash(cancellation);
